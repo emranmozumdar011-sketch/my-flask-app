@@ -3,22 +3,607 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Video Downloader</title>
+    <title>EM Fast 4K</title>
     <style>
-        body { font-family: Arial, sans-serif; background: #f4f4f9; text-align: center; padding: 50px; }
-        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0px 0px 10px rgba(0,0,0,0.1); display: inline-block; }
-        input[type="text"] { width: 300px; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 5px; }
-        button { padding: 10px 20px; font-size: 16px; background: #ff0000; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px; }
-        button:hover { background: #cc0000; }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #060913;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .phone-container {
+            position: relative;
+            width: 100%;
+            max-width: 420px;
+            height: 100%;
+            max-height: 850px;
+            background: radial-gradient(circle at center, #101827 0%, #060913 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 20px 15px 20px;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        .top-section {
+            text-align: center;
+            margin-top: 5px;
+            width: 90%;
+        }
+
+        .header-title {
+            font-size: 26px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #00f3ff 0%, #b062ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 10px rgba(0, 243, 255, 0.5));
+            letter-spacing: 1.5px;
+            margin-bottom: 2px;
+        }
+
+        .header-subtitle {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+        }
+
+        .center-wrapper {
+            position: relative;
+            width: 175px;
+            height: 175px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+        }
+
+        .neon-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            border-top-color: #00f3ff;
+            border-bottom-color: #ff00ff;
+            animation: spin 3s linear infinite;
+            pointer-events: none;
+        }
+
+        .neon-ring-2 {
+            position: absolute;
+            width: 85%;
+            height: 85%;
+            border-radius: 50%;
+            border: 2px dashed rgba(0, 243, 255, 0.5);
+            animation: spin-reverse 6s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes spin-reverse {
+            0% { transform: rotate(360deg); }
+            100% { transform: rotate(0deg); }
+        }
+
+        .exact-logo-box {
+            width: 105px;
+            height: 105px;
+            background: linear-gradient(145deg, #070d22 0%, #03050a 100%);
+            border-radius: 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 25px rgba(0, 243, 255, 0.35);
+            border: 2px solid rgba(0, 243, 255, 0.3);
+        }
+
+        .logo-text-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+
+        .logo-em {
+            font-size: 38px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #00f3ff 0%, #b062ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 10px rgba(0, 243, 255, 0.6));
+            letter-spacing: 2px;
+            margin-bottom: 2px;
+        }
+
+        .logo-4k {
+            font-size: 22px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #ff00ff 0%, #00f3ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 8px rgba(255, 0, 255, 0.6));
+            letter-spacing: 3px;
+        }
+
+        .paste-input-box {
+            width: 65%;
+            padding: 7px 12px;
+            background: linear-gradient(135deg, rgba(0, 243, 255, 0.1), rgba(255, 0, 255, 0.1));
+            border: 1.5px solid #00f3ff;
+            border-radius: 20px;
+            color: #00f3ff;
+            font-size: 13px;
+            text-align: center;
+            outline: none;
+            box-shadow: 0 0 12px rgba(0, 243, 255, 0.4), inset 0 0 6px rgba(0, 243, 255, 0.2);
+            transition: all 0.3s ease;
+            margin-top: -5px;
+            margin-bottom: 3px;
+        }
+
+        .paste-input-box:focus {
+            border-color: #ff00ff;
+            box-shadow: 0 0 15px rgba(255, 0, 255, 0.6), inset 0 0 8px rgba(255, 0, 255, 0.3);
+        }
+
+        .paste-input-box::placeholder {
+            color: rgba(0, 243, 255, 0.7);
+            font-weight: 500;
+        }
+
+        .download-action-btn {
+            background: linear-gradient(135deg, #00f3ff 0%, #ff00ff 100%);
+            border: none;
+            color: #060913;
+            font-size: 12px;
+            font-weight: 900;
+            padding: 6px 20px;
+            border-radius: 15px;
+            cursor: pointer;
+            box-shadow: 0 0 12px rgba(0, 243, 255, 0.5);
+            margin-bottom: 5px;
+            letter-spacing: 1px;
+            transition: transform 0.2s ease;
+        }
+
+        .download-action-btn:active {
+            transform: scale(0.95);
+        }
+
+        .progress-section {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            margin-bottom: 5px;
+        }
+
+        .progress-bar-container {
+            width: 70%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #00f3ff, #ff00ff);
+            border-radius: 4px;
+            box-shadow: 0 0 10px #00f3ff;
+            transition: width 0.3s ease;
+        }
+
+        .percentage {
+            color: #00f3ff;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .videos-circle-wrapper {
+            position: relative;
+            width: 72px;
+            height: 72px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+
+        .videos-circle-box {
+            position: relative;
+            width: 68px;
+            height: 68px;
+            background: radial-gradient(circle, #0b1329 0%, #03050a 100%);
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border: 2px solid rgba(0, 243, 255, 0.4);
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
+            z-index: 2;
+            overflow: hidden;
+        }
+
+        .inner-dots-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            animation: spin 5s linear infinite;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .dot {
+            position: absolute;
+            width: 3px;
+            height: 3px;
+            border-radius: 50%;
+            background: #00f3ff;
+            box-shadow: 0 0 6px #00f3ff, 0 0 10px #00f3ff;
+            animation: twinkle 1.2s infinite alternate ease-in-out;
+        }
+
+        .d1  { top: 6px; left: 30px; animation-delay: 0.1s; }
+        .d2  { top: 10px; left: 45px; animation-delay: 0.3s; }
+        .d3  { top: 20px; right: 10px; animation-delay: 0.5s; }
+        .d4  { top: 35px; right: 6px; animation-delay: 0.2s; }
+        .d5  { bottom: 12px; right: 12px; animation-delay: 0.4s; }
+        .d6  { bottom: 6px; right: 30px; animation-delay: 0.6s; }
+        .d7  { bottom: 10px; left: 18px; animation-delay: 0.3s; }
+        .d8  { top: 25px; left: 8px; animation-delay: 0.5s; }
+        .d9  { top: 14px; left: 20px; animation-delay: 0.7s; }
+        .d10 { bottom: 20px; left: 10px; animation-delay: 0.2s; }
+        .d11 { top: 8px; right: 20px; animation-delay: 0.4s; }
+        .d12 { bottom: 12px; right: 22px; animation-delay: 0.1s; }
+        .d13 { top: 30px; left: 14px; animation-delay: 0.8s; }
+        .d14 { bottom: 25px; right: 14px; animation-delay: 0.3s; }
+        .d15 { top: 18px; right: 25px; animation-delay: 0.5s; }
+        .d16 { bottom: 8px; left: 32px; animation-delay: 0.6s; }
+
+        @keyframes twinkle {
+            0% { opacity: 0.2; transform: scale(0.7); }
+            100% { opacity: 1; transform: scale(1.5); box-shadow: 0 0 10px #00f3ff, 0 0 16px #00f3ff; }
+        }
+
+        .white-smoke-aura {
+            position: absolute;
+            width: 68px;
+            height: 68px;
+            border-radius: 50%;
+            background: transparent;
+            border: 2px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 20px #ffffff, 0 0 40px rgba(255, 255, 255, 0.8), inset 0 0 15px rgba(255, 255, 255, 0.6);
+            opacity: 0;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .active-smoke .white-smoke-aura {
+            animation: whiteSmokeExplosion 1.5s infinite ease-out;
+        }
+
+        @keyframes whiteSmokeExplosion {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.7); opacity: 0; }
+        }
+
+        .library-title {
+            font-size: 9.5px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #00f3ff 0%, #b062ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 6px rgba(0, 243, 255, 0.6));
+            letter-spacing: 0.8px;
+            line-height: 1.1;
+            z-index: 3;
+        }
+
+        .library-sub-4k {
+            font-size: 11.5px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #ff00ff 0%, #00f3ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 6px rgba(255, 0, 255, 0.6));
+            letter-spacing: 1.5px;
+            margin-top: 1px;
+            z-index: 3;
+        }
+
+        .history-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(6, 9, 19, 0.95);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(0, 243, 255, 0.3);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        .history-title {
+            color: #00f3ff;
+            font-size: 16px;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: #ff00ff;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .history-item {
+            background: rgba(0, 243, 255, 0.05);
+            border: 1px solid rgba(0, 243, 255, 0.2);
+            border-radius: 12px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .history-item-name {
+            color: #ffffff;
+            font-size: 12px;
+            word-break: break-all;
+        }
+
+        .download-btn-item {
+            background: linear-gradient(135deg, #00f3ff, #b062ff);
+            color: #060913;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 800;
+            cursor: pointer;
+            text-align: center;
+            text-decoration: none;
+            box-shadow: 0 0 10px rgba(0, 243, 255, 0.5);
+        }
+
+        .no-history {
+            color: rgba(255, 255, 255, 0.4);
+            text-align: center;
+            margin-top: 50px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h2>YouTube Video Downloader</h2>
-        <form action="/download" method="post">
-            <input type="text" name="url" placeholder="Paste YouTube Video URL here..." required><br>
-            <button type="submit">Download Video</button>
-        </form>
+
+    <div class="phone-container">
+        <div class="top-section">
+            <div id="headerTitle" class="header-title">EM Fast 4K</div>
+            <div class="header-subtitle">SPLITER</div>
+        </div>
+
+        <div class="center-wrapper">
+            <div class="neon-ring"></div>
+            <div class="neon-ring-2"></div>
+            <div class="exact-logo-box">
+            <div class="logo-text-group">
+                    <span class="logo-em">EM</span>
+                    <span class="logo-4k">4K</span>
+                </div>
+            </div>
+        </div>
+
+        <input type="text" id="linkInput" class="paste-input-box" placeholder="Paste Link Here">
+        
+        <button onclick="startDownload()" class="download-action-btn">DOWNLOAD</button>
+
+        <div class="progress-section">
+            <div class="progress-bar-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+            <div id="percentageText" class="percentage">0%</div>
+        </div>
+
+        <div id="videosWrapper" class="videos-circle-wrapper">
+            <div class="white-smoke-aura"></div>
+            <div class="videos-circle-box">
+                <div class="inner-dots-ring">
+                    <div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div><div class="dot d4"></div>
+                    <div class="dot d5"></div><div class="dot d6"></div><div class="dot d7"></div><div class="dot d8"></div>
+                    <div class="dot d9"></div><div class="dot d10"></div><div class="dot d11"></div><div class="dot d12"></div>
+                    <div class="dot d13"></div><div class="dot d14"></div><div class="dot d15"></div><div class="dot d16"></div>
+                </div>
+                <div class="library-title">VIDEOS</div>
+                <div class="library-sub-4k">4K</div>
+            </div>
+        </div>
+
+        <div id="historyModal" class="history-modal">
+            <div class="history-header">
+                <div class="history-title">DOWNLOAD HISTORY</div>
+                <button id="closeModal" class="close-btn">&times;</button>
+            </div>
+            <div id="historyList" class="history-list"></div>
+        </div>
     </div>
+
+    <script>
+        const linkInput = document.getElementById('linkInput');
+        const headerTitle = document.getElementById('headerTitle');
+        const progressBar = document.getElementById('progressBar');
+        const percentageText = document.getElementById('percentageText');
+        const videosWrapper = document.getElementById('videosWrapper');
+        const historyModal = document.getElementById('historyModal');
+        const closeModal = document.getElementById('closeModal');
+        const historyList = document.getElementById('historyList');
+
+        let isDownloading = false;
+
+        videosWrapper.addEventListener('click', () => {
+            renderHistory();
+            historyModal.style.display = 'flex';
+        });
+
+        closeModal.addEventListener('click', () => {
+            historyModal.style.display = 'none';
+        });
+
+        function saveToHistory(url, fileName) {
+            let history = JSON.parse(localStorage.getItem('em_download_history')) || [];
+            history.unshift({ url, fileName, date: new Date().toLocaleDateString() });
+            if (history.length > 20) history.pop();
+            localStorage.setItem('em_download_history', JSON.stringify(history));
+        }
+
+        function renderHistory() {
+            let history = JSON.parse(localStorage.getItem('em_download_history')) || [];
+            historyList.innerHTML = '';
+
+            if (history.length === 0) {
+                historyList.innerHTML = '<div class="no-history">কোনো ডাউনলোড হিস্ট্রি পাওয়া যায়নি!</div>';
+                return;
+            }
+
+            history.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.innerHTML = `
+                    <div class="history-item-name">📁 ${item.fileName}</div>
+                    <div style="font-size: 10px; color: rgba(255,255,255,0.5);">তারিখ: ${item.date}</div>
+                    <div style="font-size: 10px; color: #00f3ff; word-break: break-all;">লিংক: ${item.url}</div>
+                    <button onclick="downloadFromHistory('${item.url}')" class="download-btn-item">💾 সরাসরি ফাইল নামান (Download)</button>
+                `;
+                historyList.appendChild(div);
+            });
+        }
+
+        function downloadFromHistory(url) {
+            linkInput.value = url;
+            historyModal.style.display = 'none';
+            startDownload();
+        }
+
+        async function startDownload() {
+            if (isDownloading) return;
+
+            let userLink = linkInput.value.trim();
+            
+            if (userLink.length > 10 && (userLink.includes('http://') || userLink.includes('https://'))) {
+                isDownloading = true;
+
+                headerTitle.innerHTML = "Processing...";
+                headerTitle.style.background = "linear-gradient(135deg, #00ff88 0%, #00f3ff 100%)";
+                headerTitle.style.webkitBackgroundClip = "text";
+                headerTitle.style.webkitTextFillColor = "transparent";
+                
+                videosWrapper.classList.remove('active-smoke');
+                progressBar.style.width = '40%';
+                percentageText.innerHTML = '40%';
+
+                const downloadUrl = `/download?url=${encodeURIComponent(userLink)}`;
+
+                try {
+                    progressBar.style.width = '80%';
+                    percentageText.innerHTML = '80%';
+
+                    const response = await fetch(downloadUrl);
+                    if (!response.ok) throw new Error('Download failed');
+                    
+                    const blob = await response.blob();
+                    const blobUrl = window.URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = 'EM_Fast_4K_' + Date.now() + '.mp4';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(blobUrl);
+
+                    progressBar.style.width = '100%';
+                    percentageText.innerHTML = '100%';
+
+                    saveToHistory(userLink, 'EM_Fast_4K_Video.mp4');
+
+                    headerTitle.innerHTML = "COMPLETED";
+                    headerTitle.style.background = "none";
+                    headerTitle.style.webkitBackgroundClip = "unset";
+                    headerTitle.style.webkitTextFillColor = "#00ff88";
+                    headerTitle.style.filter = "drop-shadow(0 0 10px rgba(0, 255, 136, 0.7))";
+
+                    videosWrapper.classList.add('active-smoke');
+                } catch (error) {
+                    alert('ডাউনলোড করতে সমস্যা হয়েছে! সঠিক লিংক দিন বা আবার চেষ্টা করুন।');
+                    headerTitle.innerHTML = "EM Fast 4K";
+                    headerTitle.style.background = "linear-gradient(135deg, #00f3ff 0%, #b062ff 100%)";
+                    headerTitle.style.webkitBackgroundClip = "text";
+                    headerTitle.style.webkitTextFillColor = "transparent";
+                    progressBar.style.width = '0%';
+                    percentageText.innerHTML = '0%';
+                }
+
+                setTimeout(() => {
+                    linkInput.value = "";
+                    isDownloading = false;
+                    progressBar.style.width = '0%';
+                    percentageText.innerHTML = '0%';
+                }, 2000);
+            } else {
+                alert('দয়া করে একটি সঠিক ভিডিও লিংক দিন!');
+            }
+        }
+
+        linkInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                startDownload();
+            }
+        });
+    </script>
 </body>
 </html>
