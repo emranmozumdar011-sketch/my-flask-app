@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EM Fast 4K</title>
+    
+    <!-- Google AdMob Script -->
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-app-pub-5648815123783488" crossorigin="anonymous"></script>
+
     <style>
         body, html {
             margin: 0;
@@ -222,6 +226,14 @@
             color: #00f3ff;
             font-size: 12px;
             font-weight: 600;
+        }
+
+        /* AdMob Banner Container Styling */
+        .admob-container {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            margin: 5px 0;
         }
 
         .videos-circle-wrapper {
@@ -453,6 +465,17 @@
                 <div id="progressBar" class="progress-bar"></div>
             </div>
             <div id="percentageText" class="percentage">0%</div>
+        </div>
+
+        <!-- AdMob Banner Ad Unit -->
+        <div class="admob-container">
+            <ins class="adsbygoogle"
+                 style="display:inline-block;width:320px;height:50px"
+                 data-ad-client="ca-app-pub-5648815123783488"
+                 data-ad-slot="4611411388"></ins>
+            <script>
+                 (adsbygoogle = window.adsbygoogle || []).push({});
+            </script>
         </div>
 
         <div id="videosWrapper" class="videos-circle-wrapper">
