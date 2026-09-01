@@ -102,6 +102,7 @@
         }
 
         .exact-logo-box {
+            position: relative;
             width: 105px;
             height: 105px;
             background: linear-gradient(145deg, #070d22 0%, #03050a 100%);
@@ -116,10 +117,35 @@
             padding: 0;
         }
 
-        .exact-logo-box img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
+        .logo-text-group {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            z-index: 2;
+        }
+
+        .logo-em {
+            font-size: 38px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #00f3ff 0%, #b062ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 10px rgba(0, 243, 255, 0.6));
+            letter-spacing: 2px;
+            margin-bottom: 2px;
+        }
+
+        .logo-4k {
+            font-size: 22px;
+            font-weight: 900;
+            background: linear-gradient(135deg, #ff00ff 0%, #00f3ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 8px rgba(255, 0, 255, 0.6));
+            letter-spacing: 3px;
         }
 
         .paste-input-box {
@@ -411,7 +437,10 @@
             <div class="neon-ring"></div>
             <div class="neon-ring-2"></div>
             <div class="exact-logo-box">
-                <img src="https://i.ibb.co.com/84M990d5/1000002866.jpg" alt="Logo">
+                <div class="logo-text-group">
+                    <span class="logo-em">EM</span>
+                    <span class="logo-4k">4K</span>
+                </div>
             </div>
         </div>
 
