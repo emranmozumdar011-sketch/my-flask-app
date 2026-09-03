@@ -1,0 +1,2013 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Education Hub - Complete App</title>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Marked.js for Markdown Formatting -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- KaTeX for Math Rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #ffffff;
+            --container-bg: #ffffff;
+            --content-bg: #f8fafc;
+            --text-color: #1e293b;
+            --text-muted: #64748b;
+            --border-color: #cbd5e1;
+            --card-bg: #ffffff;
+            --nav-bg: #ffffff;
+            --bubble-ai-bg: #ffffff;
+            --bubble-ai-text: #334155;
+            --bubble-ai-border: #e2e8f0;
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #0f172a;
+            --container-bg: #0f172a;
+            --content-bg: #1e293b;
+            --text-color: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --card-bg: #1e293b;
+            --nav-bg: #1e293b;
+            --bubble-ai-bg: #334155;
+            --bubble-ai-text: #f1f5f9;
+            --bubble-ai-border: #475569;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            transition: background-color 0.3s ease;
+            font-size: 14px;
+        }
+
+        .mobile-container {
+            width: 100%;
+            max-width: 420px;
+            height: 100vh;
+            max-height: 850px;
+            background: var(--container-bg);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        #networkBanner {
+            background: #ef4444;
+            color: #fff;
+            font-size: 11px;
+            text-align: center;
+            padding: 4px;
+            display: none;
+            font-weight: 600;
+        }
+
+        .app-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 16px 75px 16px;
+            background: var(--content-bg);
+            transition: background 0.3s ease;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .app-header h2 {
+            font-size: 21px;
+            color: var(--text-color);
+            font-weight: 700;
+        }
+
+        .header-icons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            background: var(--border-color);
+            border: none;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--text-color);
+            font-size: 14px;
+            transition: transform 0.2s;
+        }
+
+        .icon-btn:active {
+            transform: scale(0.9);
+        }
+
+        .translation-boxes-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        .trans-box {
+            flex: 1;
+            background: var(--card-bg);
+            border: 1.5px solid var(--border-color);
+            border-radius: 14px;
+            padding: 12px 10px;
+            text-align: center;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .trans-box:hover {
+            border-color: #3b82f6;
+        }
+
+        .trans-box i {
+            font-size: 16px;
+            color: #3b82f6;
+        }
+
+        .trans-box span {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-color);
+        }
+
+        .search-box-wrapper {
+            margin-bottom: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .image-preview-container {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            background: var(--card-bg);
+            border: 1.5px solid var(--border-color);
+            padding: 6px 10px;
+            border-radius: 12px;
+            width: fit-content;
+        }
+
+        .image-preview-container img {
+            width: 35px;
+            height: 35px;
+            object-fit: cover;
+            border-radius: 6px;
+        }
+
+        .image-preview-container span {
+            font-size: 12px;
+            color: var(--text-color);
+            font-weight: 600;
+        }
+
+        .image-preview-container button {
+            background: none;
+            border: none;
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 2px 6px;
+        }
+
+        .search-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 12px 75px 12px 42px;
+            border: 1.5px solid var(--border-color);
+            border-radius: 25px;
+            background: var(--card-bg);
+            font-size: inherit;
+            color: var(--text-color);
+            outline: none;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+        }
+
+        .search-box input:focus {
+            border-color: #3b82f6;
+        }
+
+        .search-box .search-icon {
+            position: absolute;
+            left: 16px;
+            color: var(--text-muted);
+            font-size: 15px;
+            pointer-events: none;
+        }
+
+        .search-right-icons {
+            position: absolute;
+            right: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .search-box .voice-icon, 
+        .search-box .camera-icon {
+            color: #3b82f6;
+            font-size: 15.5px;
+            cursor: pointer;
+            padding: 4px;
+        }
+
+        .voice-icon.listening {
+            color: #ef4444;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        .books-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px;
+        }
+
+        .book-card {
+            border-radius: 20px;
+            padding: 20px 10px;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 175px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+            text-align: center;
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .book-card:active {
+            transform: scale(0.96);
+        }
+
+        .icon-circle {
+            width: 62px;
+            height: 62px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(8px);
+            border: 1.5px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+            position: relative;
+        }
+
+        .book-base {
+            font-size: 32px;
+            color: #ffffff;
+        }
+
+        .book-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -48%);
+            font-size: 13.5px;
+            font-weight: 800;
+        }
+
+        .card-title {
+            font-size: 17px;
+            font-weight: 700;
+            margin-bottom: 3px;
+        }
+
+        .card-desc {
+            font-size: 11px;
+            opacity: 0.92;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .category-view, .saved-view, .folder-detail-view, .favorites-view, .history-view, .quiz-view, .flashcard-view {
+            display: none;
+        }
+
+        .back-btn {
+            background: #3b82f6;
+            color: #ffffff;
+            border: none;
+            padding: 7px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12.5px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .current-book-badge {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-color);
+            background: var(--border-color);
+            padding: 6px 10px;
+            border-radius: 6px;
+            max-width: 150px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .create-folder-btn, .save-note-btn {
+            background: #10b981;
+            color: #ffffff;
+            border: none;
+            padding: 7px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .inline-note-box {
+            background: var(--card-bg);
+            border: 1.5px solid var(--border-color);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .inline-input, .inline-textarea {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-color);
+            border-radius: 8px;
+            font-size: inherit;
+            outline: none;
+        }
+
+        .inline-save-btn {
+            background: #10b981;
+            color: #ffffff;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            align-self: flex-end;
+        }
+
+        .chat-container {
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .user-bubble {
+            background: #e0f2fe;
+            color: #0369a1;
+            padding: 12px 15px;
+            border-radius: 14px 14px 2px 14px;
+            font-size: inherit;
+            font-weight: 600;
+            max-width: 90%;
+            align-self: flex-end;
+        }
+
+        .ai-bubble {
+            background: var(--bubble-ai-bg);
+            color: var(--bubble-ai-text);
+            border: 1px solid var(--bubble-ai-border);
+            padding: 14px 16px;
+            border-radius: 14px 14px 14px 2px;
+            font-size: inherit;
+            line-height: 1.7;
+            max-width: 95%;
+            align-self: flex-start;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+            text-align: left;
+        }
+
+        .ai-bubble code {
+            background: rgba(0,0,0,0.08);
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(59, 130, 246, 0.3);
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 0.8s ease-in-out infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .ai-action-footer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: -4px;
+            margin-bottom: 5px;
+        }
+
+        .action-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 5px 10px;
+            font-size: 11.5px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .folders-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .folder-card, .saved-item-card {
+            background: var(--card-bg);
+            border: 1.5px solid var(--border-color);
+            border-radius: 14px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+            text-align: center;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .folder-card i.fa-folder {
+            font-size: 32px;
+            color: #f59e0b;
+        }
+
+        .folder-card h4, .saved-item-card h4 {
+            font-size: 14px;
+            color: var(--text-color);
+            font-weight: 700;
+        }
+
+        .folder-card span {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .saved-item-card {
+            align-items: flex-start;
+            text-align: left;
+            margin-bottom: 10px;
+            padding: 14px;
+            position: relative;
+        }
+
+        .saved-item-card p {
+            font-size: inherit;
+            color: var(--text-color);
+        }
+
+        .saved-item-card .ans-box {
+            font-size: inherit;
+            color: var(--text-muted);
+            background: var(--content-bg);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .delete-item-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 5px;
+            z-index: 5;
+        }
+
+        .card-orange { background: linear-gradient(135deg, #ff7e39, #e65c00); }   
+        .card-green { background: linear-gradient(135deg, #2ecc71, #1b8a51); }    
+        .card-purple { background: linear-gradient(135deg, #a855f7, #7c3aed); }   
+        .card-brown { background: linear-gradient(135deg, #f59e0b, #d97706); }    
+        .card-teal { background: linear-gradient(135deg, #14b8a6, #0d9488); }     
+        .card-blue { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }     
+
+        .bottom-navigation {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 68px;
+            background: var(--nav-bg);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding: 0 5px;
+        }
+
+        .nav-button {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 10.5px;
+            font-weight: 600;
+            text-decoration: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .nav-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--border-color);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+
+        .nav-button.active .nav-icon {
+            background: #3b82f6;
+            color: #ffffff;
+        }
+
+        .nav-button.active span {
+            color: #3b82f6;
+            font-weight: 700;
+        }
+
+        #toastNotification {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: #1e293b;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s ease;
+            z-index: 2000;
+        }
+        #toastNotification.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .custom-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: flex-end;
+        }
+
+        .custom-modal-content {
+            background: var(--container-bg);
+            width: 100%;
+            max-width: 420px;
+            border-radius: 20px 20px 0 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .modal-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-color);
+            text-align: center;
+        }
+
+        .modal-option-btn {
+            background: var(--card-bg);
+            border: 1.5px solid var(--border-color);
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 13.5px;
+            font-weight: 600;
+            color: var(--text-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+
+        .modal-cancel-btn {
+            background: #fee2e2;
+            border: none;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 700;
+            color: #dc2626;
+            text-align: center;
+            cursor: pointer;
+        }
+        
+        .modal-input {
+            width: 100%;
+            padding: 10px;
+            border: 1.5px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--card-bg);
+            color: var(--text-color);
+            outline: none;
+        }
+
+        .modal-submit-btn {
+            background: #10b981;
+            color: #fff;
+            border: none;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .extra-tools-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .extra-tool-btn {
+            flex: 1;
+            background: var(--card-bg);
+            border: 1.5px solid var(--border-color);
+            color: var(--text-color);
+            padding: 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: 0.2s;
+        }
+        .extra-tool-btn:hover {
+            border-color: #3b82f6;
+            color: #3b82f6;
+        }
+
+        /* কুইজ ও ফ্ল্যাশকার্ড ইন্টারফেস স্টাইল */
+        .quiz-card {
+            background: var(--card-bg);
+            border: 1.5px solid var(--border-color);
+            border-radius: 14px;
+            padding: 16px;
+            margin-bottom: 15px;
+        }
+        .quiz-question {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-color);
+            margin-bottom: 12px;
+        }
+        .quiz-option {
+            background: var(--content-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            font-size: 13.5px;
+            transition: 0.2s;
+        }
+        .quiz-option:hover {
+            border-color: #3b82f6;
+        }
+        .quiz-option.correct {
+            background: #d1fae5 !important;
+            border-color: #10b981 !important;
+            color: #065f46 !important;
+            font-weight: 700;
+        }
+        .quiz-option.wrong {
+            background: #fee2e2 !important;
+            border-color: #ef4444 !important;
+            color: #991b1b !important;
+            font-weight: 700;
+        }
+        .quiz-score-badge {
+            background: #3b82f6;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="mobile-container">
+        <div id="networkBanner">ইন্টারনেট কানেকশন বিচ্ছিন্ন হয়েছে!</div>
+        <div id="toastNotification">Copied to clipboard!</div>
+        <div class="app-content" id="appContentArea">
+            <div class="app-header">
+                <h2>AI Education Hub</h2>
+                <div class="header-icons">
+                    <button class="icon-btn" onclick="toggleFontSize()" title="Toggle Font Size"><i class="fa-solid fa-text-height"></i></button>
+                    <button class="icon-btn" onclick="toggleDarkMode()" title="Toggle Theme"><i class="fa-solid fa-moon" id="themeIcon"></i></button>
+                </div>
+            </div>
+
+            <!-- হোম পেজ গ্রিড -->
+            <div id="homeView">
+                <div class="translation-boxes-container">
+                    <div class="trans-box" onclick="openTranslationMode('বাংলা থেকে ইংলিশ', 'bangla_to_english')">
+                        <i class="fa-solid fa-comment-dots"></i>
+                        <span>বাংলা থেকে ইংলিশ</span>
+                    </div>
+                    <div class="trans-box" onclick="openTranslationMode('English to Bangla', 'english_to_bangla')">
+                        <i class="fa-solid fa-earth-americas"></i>
+                        <span>English to Bangla</span>
+                    </div>
+                </div>
+
+                <div class="books-grid">
+                    <div class="book-card card-orange" onclick="openCategory('Bangla Book', 'bangla_book')">
+                        <div class="icon-circle">
+                            <i class="fa-solid fa-book-open book-base"></i>
+                            <span class="book-overlay" style="color: #c2410c;">অ</span>
+                        </div>
+                        <div class="card-title">বাংলা বই</div>
+                        <div class="card-desc">বাংলা ভাষা ও রচনা</div>
+                    </div>
+
+                    <div class="book-card card-green" onclick="openCategory('Hindi Book', 'hindi_book')">
+                        <div class="icon-circle">
+                            <i class="fa-solid fa-book-open book-base"></i>
+                            <span class="book-overlay" style="color: #15803d;">अ</span>
+                        </div>
+                        <div class="card-title">हिंदी बुक</div>
+                        <div class="card-desc">हिंदी भाषा</div>
+                    </div>
+
+                    <div class="book-card card-purple" onclick="openCategory('Math Book', 'math_book')">
+                        <div class="icon-circle">
+                            <i class="fa-solid fa-book-open book-base"></i>
+                            <span class="book-overlay" style="color: #6d28d9; font-size: 15px;">π</span>
+                        </div>
+                        <div class="card-title">গণিত বই</div>
+                        <div class="card-desc">স্টেপ-বাই-স্টেপ সমাধান</div>
+                    </div>
+
+                    <div class="book-card card-brown" onclick="openCategory('General Knowledge', 'general_knowledge')">
+                        <div class="icon-circle">
+                            <i class="fa-solid fa-book-open book-base"></i>
+                            <i class="fa-solid fa-globe book-overlay" style="color: #b45309; font-size: 11.5px;"></i>
+                        </div>
+                        <div class="card-title">সাধারণ জ্ঞান</div>
+                        <div class="card-desc">পয়েন্ট আকারে তথ্য</div>
+                    </div>
+
+                    <div class="book-card card-teal" onclick="openCategory('Arabic Book', 'arabic_book')">
+                        <div class="icon-circle">
+                            <i class="fa-solid fa-book-open book-base"></i>
+                            <span class="book-overlay" style="color: #0f766e; font-size: 16px;">ع</span>
+                        </div>
+                        <div class="card-title">আরবি বই</div>
+                        <div class="card-desc">اللغة العربية</div>
+                    </div>
+
+                    <div class="book-card card-blue" onclick="openCategory('ENGLISH BOOK', 'english_book')">
+                        <div class="icon-circle">
+                            <i class="fa-solid fa-book-open book-base"></i>
+                            <span class="book-overlay" style="color: #1e40af; font-size: 14px;">A</span>
+                        </div>
+                        <div class="card-title" style="font-size: 15px;">ENGLISH BOOK</div>
+                        <div class="card-desc">English Language</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ক্যাটাগরি পেজ -->
+            <div id="categoryView" class="category-view">
+                <div class="top-bar">
+                    <button class="back-btn" onclick="goHome()"><i class="fa-solid fa-arrow-left"></i> Home</button>
+                    <span id="categoryTitleBadge" class="current-book-badge">Book Name</span>
+                </div>
+
+                <div class="extra-tools-row">
+                    <button class="extra-tool-btn" onclick="startQuizMode()"><i class="fa-solid fa-circle-question" style="color: #3b82f6;"></i> Quiz Test</button>
+                    <button class="extra-tool-btn" onclick="startFlashcardMode()"><i class="fa-solid fa-clone" style="color: #10b981;"></i> Flashcard</button>
+                </div>
+                
+                <div class="search-box-wrapper">
+                    <div id="imagePreviewContainer" class="image-preview-container">
+                        <img id="previewImgTag" src="" alt="preview">
+                        <span>Attached Image</span>
+                        <button onclick="clearSelectedImage()"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="search-box">
+                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                        <input type="text" id="catSearchInput" placeholder="Type your question here...">
+                        <div class="search-right-icons">
+                            <i class="fa-solid fa-microphone voice-icon" id="voiceBtn" onclick="startVoiceRecognition()" title="Speak"></i>
+                            <i class="fa-solid fa-camera camera-icon" onclick="openImageOptionsModal()"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="chatContainer" class="chat-container">
+                    <div id="userQueryBubble" class="user-bubble">Query: Your question</div>
+                    <div class="ai-bubble">
+                        <div id="aiAnswerText">Generating answer...</div>
+                    </div>
+                    <div class="ai-action-footer">
+                        <button class="action-btn" onclick="copyAiAnswer(this)"><i class="fa-regular fa-copy"></i> Copy</button>
+                        <button class="action-btn" onclick="toggleFavoriteCurrent()"><i class="fa-solid fa-star" id="favIconBtn" style="color: #f59e0b;"></i> Favorite</button>
+                        <button class="action-btn" onclick="speakAiAnswer()"><i class="fa-solid fa-volume-high"></i> Listen</button>
+                        <button class="action-btn" onclick="shareAiAnswer()"><i class="fa-solid fa-share-nodes"></i> Share</button>
+                        <button class="action-btn" onclick="downloadTxtFile()"><i class="fa-solid fa-download"></i> Save</button>
+                        <button class="action-btn" onclick="openSaveToFolderModal()"><i class="fa-regular fa-bookmark" style="color: #3b82f6;"></i> Folder</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ইন্টারেক্টিভ কুইজ পেজ -->
+            <div id="quizView" class="quiz-view">
+                <div class="top-bar">
+                    <button class="back-btn" onclick="openCategory(currentDisplayTitle, currentCategoryKey)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+                    <span class="current-book-badge" id="quizBadgeTitle">🎯 Quiz Battle</span>
+                </div>
+                
+                <div class="search-box-wrapper" style="margin-bottom: 15px;">
+                    <div id="quizImagePreviewContainer" class="image-preview-container">
+                        <img id="quizPreviewImgTag" src="" alt="preview">
+                        <span>Attached Image</span>
+                        <button onclick="clearQuizSelectedImage()"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="search-box">
+                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                        <input type="text" id="quizTopicInput" placeholder="টপিক বা বিষয়ের নাম লিখুন...">
+                        <div class="search-right-icons">
+                            <i class="fa-solid fa-camera camera-icon" onclick="openQuizImageOptionsModal()" title="Upload Image"></i>
+                        </div>
+                    </div>
+                </div>
+                <button id="quizSubmitBtn" class="inline-save-btn" style="width: 100%; margin-bottom: 15px; justify-content: center; display: flex;" onclick="generateQuizFromInput()">কুইজ শুরু করুন</button>
+
+                <div id="quizScoreDisplay" class="quiz-score-badge">Score: 0 / 0</div>
+                <div id="quizQuestionsContainer"></div>
+            </div>
+
+            <!-- ফ্ল্যাশকার্ড পেজ -->
+            <div id="flashcardView" class="flashcard-view">
+                <div class="top-bar">
+                    <button class="back-btn" onclick="openCategory(currentDisplayTitle, currentCategoryKey)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+                    <span class="current-book-badge" id="flashcardBadgeTitle">⚡ Quick Revision</span>
+                </div>
+                
+                <div class="search-box-wrapper" style="margin-bottom: 15px;">
+                    <div id="flashcardImagePreviewContainer" class="image-preview-container">
+                        <img id="flashcardPreviewImgTag" src="" alt="preview">
+                        <span>Attached Image</span>
+                        <button onclick="clearFlashcardSelectedImage()"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="search-box">
+                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                        <input type="text" id="flashcardTopicInput" placeholder="Enter topic for quick revision...">
+                        <div class="search-right-icons">
+                            <i class="fa-solid fa-camera camera-icon" onclick="openFlashcardImageOptionsModal()" title="Upload Image"></i>
+                        </div>
+                    </div>
+                </div>
+                <button id="flashcardSubmitBtn" class="inline-save-btn" style="width: 100%; margin-bottom: 15px; justify-content: center; display: flex; background: #10b981;" onclick="generateFlashcards()">Generate Flashcard</button>
+
+                <div id="flashcardContainer"></div>
+            </div>
+
+            <!-- ফোল্ডার লিস্ট পেজ -->
+            <div id="savedView" class="saved-view">
+                <div class="top-bar">
+                    <button class="back-btn" onclick="goHome()"><i class="fa-solid fa-arrow-left"></i> Home</button>
+                    <button class="create-folder-btn" onclick="openCreateFolderModal()"><i class="fa-solid fa-folder-plus"></i> New Folder</button>
+                </div>
+                <div id="foldersContainer" class="folders-grid"></div>
+            </div>
+
+            <!-- ফেভারিটস পেজ -->
+            <div id="favoritesView" class="favorites-view">
+                <div class="top-bar">
+                    <button class="back-btn" onclick="goHome()"><i class="fa-solid fa-arrow-left"></i> Home</button>
+                    <span class="current-book-badge">⭐ Favorites</span>
+                </div>
+                <div id="favoritesContainer" style="margin-top: 12px;"></div>
+            </div>
+
+            <!-- হিস্ট্রি পেজ -->
+            <div id="historyView" class="history-view">
+                <div class="top-bar">
+                    <button class="back-btn" onclick="goHome()"><i class="fa-solid fa-arrow-left"></i> Home</button>
+                    <button class="back-btn" style="background:#ef4444;" onclick="clearHistory()">Clear All</button>
+                </div>
+                <div id="historyContainer" style="margin-top: 12px;"></div>
+            </div>
+
+            <!-- ফোল্ডার ডিটেইলস পেজ -->
+            <div id="folderDetailView" class="folder-detail-view">
+                <div class="top-bar">
+                    <button class="back-btn" onclick="openSavedPage()"><i class="fa-solid fa-arrow-left"></i> Folders</button>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <span id="currentFolderNameBadge" class="current-book-badge">Folder</span>
+                        <button class="save-note-btn" onclick="toggleInlineNoteBox()"><i class="fa-solid fa-pen-to-square"></i> Note</button>
+                    </div>
+                </div>
+
+                <div id="inlineNoteBox" class="inline-note-box" style="display: none;">
+                    <input type="text" id="inlineNoteTitle" class="inline-input" placeholder="শিরোনাম লিখুন...">
+                    <textarea id="inlineNoteContent" class="inline-textarea" placeholder="এখানে নোট লিখুন..."></textarea>
+                    <button class="inline-save-btn" onclick="saveInlineNote()"><i class="fa-solid fa-check"></i> Save</button>
+                </div>
+
+                <div id="folderItemsContainer" style="margin-top: 12px;"></div>
+            </div>
+        </div>
+
+        <!-- বটম ন্যাভিগেশন -->
+        <div class="bottom-navigation">
+            <a id="navHomeBtn" class="nav-button active" onclick="goHome()">
+                <div class="nav-icon"><i class="fa-solid fa-house"></i></div>
+                <span>Home</span>
+            </a>
+            <a id="navFolderBtn" class="nav-button" onclick="openSavedPage()">
+                <div class="nav-icon"><i class="fa-solid fa-folder-open"></i></div>
+                <span>Folders</span>
+            </a>
+            <a id="navFavBtn" class="nav-button" onclick="openFavoritesPage()">
+                <div class="nav-icon"><i class="fa-solid fa-star"></i></div>
+                <span>Favorites</span>
+            </a>
+            <a id="navHistoryBtn" class="nav-button" onclick="openHistoryPage()">
+                <div class="nav-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                <span>History</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- ইমেজ অপশন মডাল -->
+    <div id="imageOptionsModal" class="custom-modal-overlay">
+        <div class="custom-modal-content">
+            <div class="modal-title">Select Image Source</div>
+            <button class="modal-option-btn" onclick="triggerDirectCamera()"><i class="fa-solid fa-camera-retro"></i> Camera</button>
+            <button class="modal-option-btn" onclick="triggerGalleryFiles()"><i class="fa-solid fa-images"></i> Gallery</button>
+            <button class="modal-cancel-btn" onclick="closeImageOptionsModal()">Cancel</button>
+        </div>
+    </div>
+
+    <!-- কুইজ ইমেজ অপশন মডাল -->
+    <div id="quizImageOptionsModal" class="custom-modal-overlay">
+        <div class="custom-modal-content">
+            <div class="modal-title">Select Quiz Image Source</div>
+            <button class="modal-option-btn" onclick="triggerQuizDirectCamera()"><i class="fa-solid fa-camera-retro"></i> Camera</button>
+            <button class="modal-option-btn" onclick="triggerQuizGalleryFiles()"><i class="fa-solid fa-images"></i> Gallery</button>
+            <button class="modal-cancel-btn" onclick="closeQuizImageOptionsModal()">Cancel</button>
+        </div>
+    </div>
+
+    <!-- ফ্ল্যাশকার্ড ইমেজ অপশন মডাল -->
+    <div id="flashcardImageOptionsModal" class="custom-modal-overlay">
+        <div class="custom-modal-content">
+            <div class="modal-title">Select Flashcard Image Source</div>
+            <button class="modal-option-btn" onclick="triggerFlashcardDirectCamera()"><i class="fa-solid fa-camera-retro"></i> Camera</button>
+            <button class="modal-option-btn" onclick="triggerFlashcardGalleryFiles()"><i class="fa-solid fa-images"></i> Gallery</button>
+            <button class="modal-cancel-btn" onclick="closeFlashcardImageOptionsModal()">Cancel</button>
+        </div>
+    </div>
+
+    <!-- ক্রিয়েট ফোল্ডার মডাল -->
+    <div id="createFolderModal" class="custom-modal-overlay">
+        <div class="custom-modal-content">
+            <div class="modal-title">Create New Folder</div>
+            <input type="text" id="newFolderNameInput" class="modal-input" placeholder="ফোল্ডারের নাম দিন...">
+            <button class="modal-submit-btn" onclick="createFolder()">Create</button>
+            <button class="modal-cancel-btn" onclick="closeCreateFolderModal()">Cancel</button>
+        </div>
+    </div>
+
+    <!-- সেভ টু ফোল্ডার মডাল -->
+    <div id="saveToFolderModal" class="custom-modal-overlay">
+        <div class="custom-modal-content">
+            <div class="modal-title">Select Folder</div>
+            <div id="folderSelectionList" style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto;"></div>
+            <button class="modal-cancel-btn" onclick="closeSaveToFolderModal()">Cancel</button>
+        </div>
+    </div>
+
+    <!-- ফোল্ডার অ্যাকশন মডাল -->
+    <div id="folderActionModal" class="custom-modal-overlay">
+        <div class="custom-modal-content">
+            <div class="modal-title" id="selectedFolderModalTitle">Folder Name</div>
+            <button class="modal-option-btn" style="color: #ef4444; border-color: #fca5a5;" onclick="triggerDeleteFromMenu()"><i class="fa-solid fa-trash"></i> Delete Folder</button>
+            <button class="modal-cancel-btn" onclick="closeFolderActionModal()">Cancel</button>
+        </div>
+    </div>
+
+    <!-- কনফার্ম ডিলিট মডাল -->
+    <div id="customConfirmModal" class="custom-modal-overlay">
+        <div class="custom-modal-content" style="text-align: center; gap: 16px;">
+            <div id="confirmText" style="color: #ef4444; font-size: 15px; font-weight: 700;">Confirm to delete</div>
+            <button class="modal-cancel-btn" style="background: #ef4444; color: #ffffff;" onclick="executeDeleteFolder()">Delete</button>
+            <button class="modal-cancel-btn" onclick="closeConfirmModal()">Cancel</button>
+        </div>
+    </div>
+
+    <input type="file" id="cameraCaptureInput" accept="image/*" capture="environment" style="display: none;" onchange="handleImageSelected(event)">
+    <input type="file" id="galleryFileInput" accept="image/*" style="display: none;" onchange="handleImageSelected(event)">
+
+    <input type="file" id="quizCameraCaptureInput" accept="image/*" capture="environment" style="display: none;" onchange="handleQuizImageSelected(event)">
+    <input type="file" id="quizGalleryFileInput" accept="image/*" style="display: none;" onchange="handleQuizImageSelected(event)">
+
+    <input type="file" id="flashcardCameraCaptureInput" accept="image/*" capture="environment" style="display: none;" onchange="handleFlashcardImageSelected(event)">
+    <input type="file" id="flashcardGalleryFileInput" accept="image/*" style="display: none;" onchange="handleFlashcardImageSelected(event)">
+
+    <script>
+        let foldersData = JSON.parse(localStorage.getItem('ai_hub_folders')) || [
+            { name: "My Studies", items: [] },
+            { name: "Important Q&A", items: [] }
+        ];
+        let favoritesData = JSON.parse(localStorage.getItem('ai_hub_favorites')) || [];
+        let historyData = JSON.parse(localStorage.getItem('ai_hub_history')) || [];
+        let currentTheme = localStorage.getItem('ai_hub_theme') || 'light';
+        
+        // আপনার এপিআই কি এখানে বসিয়ে দিন
+        let customApiKey = "আপনার_এপিআই_কি_এখানে_দিন"; 
+        let currentFontSizeLevel = 1;
+        let selectedBase64Image = null; 
+        let selectedQuizBase64Image = null;
+        let selectedFlashcardBase64Image = null;
+        let currentQuizScore = 0;
+        let totalQuizAnswered = 0;
+
+        if(currentTheme === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.getElementById('themeIcon').className = "fa-solid fa-sun";
+        }
+
+        window.addEventListener('online', () => document.getElementById('networkBanner').style.display = 'none');
+        window.addEventListener('offline', () => document.getElementById('networkBanner').style.display = 'block');
+
+        function saveDataToStorage() {
+            localStorage.setItem('ai_hub_folders', JSON.stringify(foldersData));
+            localStorage.setItem('ai_hub_favorites', JSON.stringify(favoritesData));
+            localStorage.setItem('ai_hub_history', JSON.stringify(historyData));
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toastNotification');
+            toast.innerText = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2000);
+        }
+
+        const homeView = document.getElementById('homeView');
+        const categoryView = document.getElementById('categoryView');
+        const savedView = document.getElementById('savedView');
+        const folderDetailView = document.getElementById('folderDetailView');
+        const favoritesView = document.getElementById('favoritesView');
+        const historyView = document.getElementById('historyView');
+        const quizView = document.getElementById('quizView');
+        const flashcardView = document.getElementById('flashcardView');
+        
+        const catSearchInput = document.getElementById('catSearchInput');
+        const chatContainer = document.getElementById('chatContainer');
+        const userQueryBubble = document.getElementById('userQueryBubble');
+        const aiAnswerText = document.getElementById('aiAnswerText');
+        const categoryTitleBadge = document.getElementById('categoryTitleBadge');
+        const foldersContainer = document.getElementById('foldersContainer');
+        const folderItemsContainer = document.getElementById('folderItemsContainer');
+        const favoritesContainer = document.getElementById('favoritesContainer');
+        const historyContainer = document.getElementById('historyContainer');
+        const currentFolderNameBadge = document.getElementById('currentFolderNameBadge');
+        const quizQuestionsContainer = document.getElementById('quizQuestionsContainer');
+        const quizScoreDisplay = document.getElementById('quizScoreDisplay');
+        const quizTopicInput = document.getElementById('quizTopicInput');
+        const quizBadgeTitle = document.getElementById('quizBadgeTitle');
+        const quizSubmitBtn = document.getElementById('quizSubmitBtn');
+
+        const flashcardTopicInput = document.getElementById('flashcardTopicInput');
+        const flashcardContainer = document.getElementById('flashcardContainer');
+        const flashcardBadgeTitle = document.getElementById('flashcardBadgeTitle');
+        const flashcardSubmitBtn = document.getElementById('flashcardSubmitBtn');
+        
+        const navHomeBtn = document.getElementById('navHomeBtn');
+        const navFolderBtn = document.getElementById('navFolderBtn');
+        const navFavBtn = document.getElementById('navFavBtn');
+        const navHistoryBtn = document.getElementById('navHistoryBtn');
+
+        let currentCategoryKey = 'bangla_book'; 
+        let currentDisplayTitle = 'Bangla Book'; 
+        let activeFolderName = "";
+        let currentAiQuery = "";
+        let currentAiRawAnswer = "";
+        let selectedFolderIndexForAction = null; 
+
+        function toggleDarkMode() {
+            if(document.documentElement.getAttribute('data-theme') === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'light');
+                localStorage.setItem('ai_hub_theme', 'light');
+                document.getElementById('themeIcon').className = "fa-solid fa-moon";
+            } else {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                localStorage.setItem('ai_hub_theme', 'dark');
+                document.getElementById('themeIcon').className = "fa-solid fa-sun";
+            }
+        }
+
+        function toggleFontSize() {
+            currentFontSizeLevel = currentFontSizeLevel === 1 ? 2 : 1;
+            if (currentFontSizeLevel === 2) {
+                document.body.style.fontSize = '16.5px';
+            } else {
+                document.body.style.fontSize = '14px';
+            }
+        }
+
+        function openCategory(displayTitle, categoryKey) {
+            currentCategoryKey = categoryKey;
+            currentDisplayTitle = displayTitle;
+            hideAllViews();
+            categoryView.style.display = 'block';
+            catSearchInput.value = '';
+            chatContainer.style.display = 'none';
+            categoryTitleBadge.innerHTML = displayTitle;
+            catSearchInput.placeholder = `Type in ${displayTitle}...`;
+            catSearchInput.focus();
+        }
+
+        function openTranslationMode(displayTitle, categoryKey) {
+            openCategory(displayTitle, categoryKey);
+        }
+
+        function openSavedPage() {
+            hideAllViews();
+            savedView.style.display = 'block';
+            renderFoldersList();
+            setActiveNav(navFolderBtn);
+        }
+
+        function openFavoritesPage() {
+            hideAllViews();
+            favoritesView.style.display = 'block';
+            renderFavoritesList();
+            setActiveNav(navFavBtn);
+        }
+
+        function openHistoryPage() {
+            hideAllViews();
+            historyView.style.display = 'block';
+            renderHistoryList();
+            setActiveNav(navHistoryBtn);
+        }
+
+        function goHome() {
+            hideAllViews();
+            homeView.style.display = 'block';
+            setActiveNav(navHomeBtn);
+        }
+
+        function hideAllViews() {
+            homeView.style.display = 'none';
+            categoryView.style.display = 'none';
+            savedView.style.display = 'none';
+            folderDetailView.style.display = 'none';
+            favoritesView.style.display = 'none';
+            historyView.style.display = 'none';
+            quizView.style.display = 'none';
+            flashcardView.style.display = 'none';
+        }
+
+        function setActiveNav(btn) {
+            [navHomeBtn, navFolderBtn, navFavBtn, navHistoryBtn].forEach(b => b.classList.remove('active'));
+            if(btn) btn.classList.add('active');
+        }
+
+        catSearchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                let query = catSearchInput.value.trim();
+                if (query !== "") getGeminiAnswer(query);
+            }
+        });
+
+        // কুইজ মোড
+        function startQuizMode() {
+            hideAllViews();
+            quizView.style.display = 'block';
+            quizTopicInput.value = '';
+            quizScoreDisplay.innerHTML = `Score: 0 / 0`;
+            quizBadgeTitle.innerHTML = `🎯 ${currentDisplayTitle} Quiz`;
+
+            let startBtnText = "কুইজ শুরু করুন";
+            let placeholderText = "টপিক বা বিষয়ের নাম লিখুন...";
+            let hintText = "Enter a topic or upload an image to start the quiz.";
+
+            if (currentCategoryKey === 'english_book' || currentCategoryKey === 'ENGLISH BOOK' || currentCategoryKey === 'english_to_bangla') {
+                startBtnText = "Start Quiz";
+                placeholderText = "Enter topic or subject name...";
+            } else if (currentCategoryKey === 'arabic_book') {
+                startBtnText = "ابدأ الاختبار";
+                placeholderText = "أدخل موضوع الاختبار...";
+            } else if (currentCategoryKey === 'hindi_book') {
+                startBtnText = "क्विज शुरू करें";
+                placeholderText = "विषय का नाम दर्ज करें...";
+            }
+
+            quizTopicInput.placeholder = placeholderText;
+            quizSubmitBtn.innerHTML = startBtnText;
+            quizQuestionsContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: 30px;">${hintText}</div>`;
+        }
+
+        async function generateQuizFromInput() {
+            let topic = quizTopicInput.value.trim();
+            if (!topic && !selectedQuizBase64Image) {
+                showToast("দয়া করে কোনো টপিক লিখুন অথবা ছবি যুক্ত করুন!");
+                return;
+            }
+
+            quizScoreDisplay.innerHTML = `Score: 0 / 0 (Generating Quiz...)`;
+            quizQuestionsContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: 30px;"><span class="loading-spinner"></span> কুইজ লোড হচ্ছে...</div>`;
+
+            currentQuizScore = 0;
+            totalQuizAnswered = 0;
+
+            let languageInstruction = "You must generate the questions and options strictly in fluent Bengali language.";
+            if (currentCategoryKey === 'english_book' || currentCategoryKey === 'ENGLISH BOOK' || currentCategoryKey === 'english_to_bangla') {
+                languageInstruction = "You must generate the questions and options strictly in professional English language only.";
+            } else if (currentCategoryKey === 'arabic_book') {
+                languageInstruction = "You must generate the questions and options strictly in classical Arabic language only.";
+            } else if (currentCategoryKey === 'hindi_book') {
+                languageInstruction = "You must generate the questions and options strictly in Hindi language only.";
+            }
+
+            let promptText = `Generate exactly 3 multiple choice quiz questions (MCQ) based on: "${topic}". 
+            ${languageInstruction}
+            You must output the result strictly as a valid JSON array without any markdown formatting blocks, in this exact format:
+            [
+              {
+                "question": "Question text here?",
+                "options": ["Option A", "Option B", "Option C", "Option D"],
+                "correct": 0
+              }
+            ]
+            Note: "correct" should be the index (0, 1, 2, or 3) of the correct option from the options array.`;
+
+            let partsArray = [{ text: promptText }];
+            if (selectedQuizBase64Image) {
+                partsArray.push({
+                    inlineData: {
+                        mimeType: selectedQuizBase64Image.mimeType,
+                        data: selectedQuizBase64Image.data
+                    }
+                });
+            }
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${customApiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ contents: [{ parts: partsArray }] })
+                });
+                const data = await response.json();
+
+                selectedQuizBase64Image = null;
+                document.getElementById('quizImagePreviewContainer').style.display = 'none';
+
+                if (data.candidates && data.candidates[0].content.parts[0].text) {
+                    let rawText = data.candidates[0].content.parts[0].text;
+                    rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+                    let quizArray = JSON.parse(rawText);
+                    renderInteractiveQuiz(quizArray);
+                } else {
+                    quizQuestionsContainer.innerHTML = `<div style="text-align: center; color: #ef4444; margin-top: 30px;">কুইজ তৈরি করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।</div>`;
+                }
+            } catch (err) {
+                selectedQuizBase64Image = null;
+                document.getElementById('quizImagePreviewContainer').style.display = 'none';
+                quizQuestionsContainer.innerHTML = `<div style="text-align: center; color: #ef4444; margin-top: 30px;">নেটওয়ার্ক বা এপিআই সমস্যা। দয়া করে আবার চেষ্টা করুন।</div>`;
+            }
+        }
+
+        function renderInteractiveQuiz(quizArray) {
+            quizScoreDisplay.innerHTML = `Score: 0 / ${quizArray.length}`;
+            let html = '';
+            quizArray.forEach((q, qIndex) => {
+                html += `
+                    <div class="quiz-card" id="quizCard-${qIndex}">
+                        <div class="quiz-question">${qIndex + 1}. ${q.question}</div>
+                        <div class="quiz-options-list">
+                `;
+                q.options.forEach((opt, optIndex) => {
+                    html += `<div class="quiz-option" onclick="checkQuizAnswer(this, ${qIndex}, ${optIndex}, ${q.correct})">${opt}</div>`;
+                });
+                html += `</div></div>`;
+            });
+            quizQuestionsContainer.innerHTML = html;
+        }
+
+        function checkQuizAnswer(element, qIndex, selectedIndex, correctIndex) {
+            const card = document.getElementById(`quizCard-${qIndex}`);
+            const options = card.querySelectorAll('.quiz-option');
+
+            if (card.dataset.answered === "true") return;
+            card.dataset.answered = "true";
+
+            totalQuizAnswered++;
+
+            if (selectedIndex === correctIndex) {
+                element.classList.add('correct');
+                currentQuizScore++;
+                showToast("সঠিক উত্তর! 🎉");
+            } else {
+                element.classList.add('wrong');
+                options[correctIndex].classList.add('correct');
+                showToast("ভুল উত্তর! ❌");
+            }
+
+            quizScoreDisplay.innerHTML = `Score: ${currentQuizScore} / ${document.querySelectorAll('.quiz-card').length}`;
+        }
+
+        // ফ্লাশকার্ড মোড
+        function startFlashcardMode() {
+            hideAllViews();
+            flashcardView.style.display = 'block';
+            flashcardTopicInput.value = '';
+            flashcardBadgeTitle.innerHTML = `⚡ ${currentDisplayTitle} Flashcard`;
+
+            let btnText = "Generate Flashcard";
+            let placeholderText = "Enter topic for quick revision...";
+
+            if (currentCategoryKey === 'bangla_book' || currentCategoryKey === 'bangla_to_english' || currentCategoryKey === 'english_to_bangla') {
+                btnText = "ফ্ল্যাশকার্ড তৈরি করুন";
+                placeholderText = "দ্রুত রিভিশনের জন্য টপিক লিখুন...";
+            }
+
+            flashcardSubmitBtn.innerHTML = btnText;
+            flashcardTopicInput.placeholder = placeholderText;
+            flashcardContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: 30px;">Enter a topic or upload an image for quick revision.</div>`;
+        }
+
+        async function generateFlashcards() {
+            let topic = flashcardTopicInput.value.trim();
+            if (!topic && !selectedFlashcardBase64Image) {
+                showToast("দয়া করে কোনো টপিক লিখুন অথবা ছবি যুক্ত করুন!");
+                return;
+            }
+
+            flashcardContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: 30px;"><span class="loading-spinner"></span> Flashcard generating...</div>`;
+
+            let promptText = `Create a summary flashcard style Q&A (Question and short Answer format) for quick revision on: "${topic}". Keep it concise and clean in English or Bengali matching the context.`;
+
+            let partsArray = [{ text: promptText }];
+            if (selectedFlashcardBase64Image) {
+                partsArray.push({
+                    inlineData: {
+                        mimeType: selectedFlashcardBase64Image.mimeType,
+                        data: selectedFlashcardBase64Image.data
+                    }
+                });
+            }
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${customApiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ contents: [{ parts: partsArray }] })
+                });
+                const data = await response.json();
+
+                selectedFlashcardBase64Image = null;
+                document.getElementById('flashcardImagePreviewContainer').style.display = 'none';
+
+                if (data.candidates && data.candidates[0].content.parts[0].text) {
+                    let rawText = data.candidates[0].content.parts[0].text;
+                    flashcardContainer.innerHTML = `<div class="quiz-card"><div class="ai-bubble" style="max-width:100%; border:none; box-shadow:none;">${marked.parse(rawText)}</div></div>`;
+                } else {
+                    flashcardContainer.innerHTML = `<div style="text-align: center; color: #ef4444; margin-top: 30px;">ফ্ল্যাশকার্ড তৈরিতে সমস্যা হয়েছে।</div>`;
+                }
+            } catch (err) {
+                selectedFlashcardBase64Image = null;
+                document.getElementById('flashcardImagePreviewContainer').style.display = 'none';
+                flashcardContainer.innerHTML = `<div style="text-align: center; color: #ef4444; margin-top: 30px;">নেটওয়ার্ক সমস্যা। আবার চেষ্টা করুন।</div>`;
+            }
+        }
+
+        function startVoiceRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                showToast("আপনার ব্রাউজার ভয়েস ইনপুট সমর্থন করে না।");
+                return;
+            }
+
+            const recognition = new SpeechRecognition();
+            recognition.lang = (currentCategoryKey.includes('english') || currentCategoryKey.includes('math_book')) ? 'en-US' : 'bn-BD';
+            const voiceBtn = document.getElementById('voiceBtn');
+
+            recognition.onstart = function() { voiceBtn.classList.add('listening'); };
+            recognition.onresult = function(event) {
+                const speechToText = event.results[0][0].transcript;
+                catSearchInput.value = speechToText;
+                voiceBtn.classList.remove('listening');
+                getGeminiAnswer(speechToText);
+            };
+            recognition.onerror = function() { voiceBtn.classList.remove('listening'); };
+            recognition.onend = function() { voiceBtn.classList.remove('listening'); };
+            recognition.start();
+        }
+
+        function speakAiAnswer() {
+            if ('speechSynthesis' in window && currentAiRawAnswer) {
+                window.speechSynthesis.cancel();
+                let utterance = new SpeechSynthesisUtterance(currentAiRawAnswer);
+                if (currentCategoryKey === 'hindi_book') {
+                    utterance.lang = 'hi-IN';
+                } else if (currentCategoryKey === 'arabic_book') {
+                    utterance.lang = 'ar-SA';
+                } else if (currentCategoryKey.includes('english')) {
+                    utterance.lang = 'en-US';
+                } else {
+                    utterance.lang = 'bn-BD';
+                }
+                window.speechSynthesis.speak(utterance);
+            } else {
+                showToast("আপনার ব্রাউজারে স্পিচ সিন্থেসিস সমর্থন করে না।");
+            }
+        }
+
+        function shareAiAnswer() {
+            if (navigator.share) {
+                navigator.share({
+                    title: 'AI Education Hub Solution',
+                    text: currentAiRawAnswer
+                }).catch(() => {});
+            } else {
+                navigator.clipboard.writeText(currentAiRawAnswer).then(() => {
+                    showToast("টেক্সট ক্লিপবোর্ডে কপি করা হয়েছে!");
+                }).catch(() => {
+                    showToast("শেয়ার করা সম্ভব হচ্ছে না।");
+                });
+            }
+        }
+
+        function downloadTxtFile() {
+            let blob = new Blob([currentAiRawAnswer], { type: "text/plain;charset=utf-8" });
+            let link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "AI_Solution.txt";
+            link.click();
+            showToast("ফাইল ডাউনলোড হয়েছে!");
+        }
+
+        function toggleFavoriteCurrent() {
+            let existsIndex = favoritesData.findIndex(f => f.query === currentAiQuery);
+            if(existsIndex >= 0) {
+                favoritesData.splice(existsIndex, 1);
+                document.getElementById('favIconBtn').style.color = "#94a3b8";
+                showToast("ফেভারিট থেকে সরানো হয়েছে");
+            } else {
+                favoritesData.push({
+                    query: currentAiQuery,
+                    answer: aiAnswerText.innerHTML,
+                    category: currentDisplayTitle,
+                    date: new Date().toLocaleDateString()
+                });
+                document.getElementById('favIconBtn').style.color = "#f59e0b";
+                showToast("ফেভারিটে সেভ করা হয়েছে!");
+            }
+            saveDataToStorage();
+        }
+
+        function renderFavoritesList() {
+            if (favoritesData.length === 0) {
+                favoritesContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: 40px; font-size: 13px;">কোনো ফেভারিট আইটেম নেই।</div>`;
+                return;
+            }
+            let html = '';
+            favoritesData.forEach((item, index) => {
+                html += `
+                    <div class="saved-item-card">
+                        <button class="delete-item-btn" onclick="removeFavorite(${index})"><i class="fa-solid fa-trash"></i></button>
+                        <h4>⭐ ${item.category} - (${item.date})</h4>
+                        <p><b>Q:</b> ${item.query}</p>
+                        <div class="ans-box">${item.answer}</div>
+                    </div>
+                `;
+            });
+            favoritesContainer.innerHTML = html;
+        }
+
+        function removeFavorite(index) {
+            favoritesData.splice(index, 1);
+            saveDataToStorage();
+            renderFavoritesList();
+            showToast("ডিলিট করা হয়েছে");
+        }
+
+        function renderHistoryList() {
+            if (historyData.length === 0) {
+                historyContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: 40px; font-size: 13px;">কোনো সার্চ হিস্ট্রি নেই।</div>`;
+                return;
+            }
+            let html = '';
+            historyData.forEach((item, index) => {
+                html += `
+                    <div class="saved-item-card">
+                        <button class="delete-item-btn" onclick="removeHistoryItem(${index})"><i class="fa-solid fa-trash"></i></button>
+                        <h4>🕒 ${item.category} - (${item.date})</h4>
+                        <p><b>Q:</b> ${item.query}</p>
+                        <div class="ans-box">${item.answer}</div>
+                    </div>
+                `;
+            });
+            historyContainer.innerHTML = html;
+        }
+
+        function removeHistoryItem(index) {
+            historyData.splice(index, 1);
+            saveDataToStorage();
+            renderHistoryList();
+        }
+
+        function clearHistory() {
+            historyData = [];
+            saveDataToStorage();
+            renderHistoryList();
+            showToast("হিস্ট্রি পরিষ্কার করা হয়েছে");
+        }
+
+        function openCreateFolderModal() { document.getElementById('createFolderModal').style.display = 'flex'; }
+        function closeCreateFolderModal() { document.getElementById('createFolderModal').style.display = 'none'; }
+
+        function createFolder() {
+            let folderName = document.getElementById('newFolderNameInput').value.trim();
+            if (folderName !== "") {
+                if (!foldersData.some(f => f.name.toLowerCase() === folderName.toLowerCase())) {
+                    foldersData.push({ name: folderName, items: [] });
+                    saveDataToStorage();
+                    renderFoldersList();
+                    closeCreateFolderModal();
+                    document.getElementById('newFolderNameInput').value = '';
+                    showToast("ফোল্ডার তৈরি সফল হয়েছে!");
+                } else {
+                    showToast("এই নামের ফোল্ডার ইতিমধ্যে রয়েছে!");
+                }
+            }
+        }
+
+        function renderFoldersList() {
+            if (foldersData.length === 0) {
+                foldersContainer.innerHTML = `<div style="grid-column: span 2; text-align: center; color: var(--text-muted); margin-top: 30px; font-size: 13px;">কোনো ফোল্ডার নেই।</div>`;
+                return;
+            }
+            let html = '';
+            foldersData.forEach((folder, index) => {
+                let escapedName = folder.name.replace(/'/g, "\\'");
+                html += `
+                    <div class="folder-card" 
+                         onclick="openFolderDetail('${escapedName}')" 
+                         oncontextmenu="handleFolderLongPress(event, ${index})" 
+                         ontouchstart="startFolderTouchTimer(event, ${index})" 
+                         ontouchend="clearFolderTouchTimer()">
+                        <i class="fa-solid fa-folder"></i>
+                        <h4>${folder.name}</h4>
+                        <span>${folder.items.length} items</span>
+                    </div>
+                `;
+            });
+            foldersContainer.innerHTML = html;
+        }
+
+        let pressTimer = null;
+
+        function startFolderTouchTimer(event, index) {
+            pressTimer = setTimeout(() => {
+                event.preventDefault(); 
+                openFolderActionModal(index);
+            }, 600); 
+        }
+
+        function clearFolderTouchTimer() {
+            if (pressTimer) {
+                clearTimeout(pressTimer);
+                pressTimer = null;
+            }
+        }
+
+        function handleFolderLongPress(event, index) {
+            event.preventDefault(); 
+            openFolderActionModal(index);
+        }
+
+        function openFolderActionModal(index) {
+            selectedFolderIndexForAction = index;
+            document.getElementById('selectedFolderModalTitle').innerHTML = foldersData[index].name;
+            document.getElementById('folderActionModal').style.display = 'flex';
+        }
+
+        function closeFolderActionModal() {
+            document.getElementById('folderActionModal').style.display = 'none';
+        }
+
+        function triggerDeleteFromMenu() {
+            document.getElementById('folderActionModal').style.display = 'none'; 
+            document.getElementById('customConfirmModal').style.display = 'flex';
+        }
+
+        function closeConfirmModal() {
+            document.getElementById('customConfirmModal').style.display = 'none';
+        }
+
+        function executeDeleteFolder() {
+            if (selectedFolderIndexForAction !== null && selectedFolderIndexForAction !== undefined) {
+                foldersData.splice(selectedFolderIndexForAction, 1);
+                saveDataToStorage();
+                renderFoldersList();
+                selectedFolderIndexForAction = null;
+                showToast("ফোল্ডার ডিলিট করা হয়েছে");
+            }
+            closeConfirmModal();
+        }
+
+        function openFolderDetail(folderName) {
+            activeFolderName = folderName;
+            hideAllViews();
+            folderDetailView.style.display = 'block';
+            currentFolderNameBadge.innerHTML = folderName;
+            document.getElementById('inlineNoteBox').style.display = 'none';
+            renderFolderItems();
+        }
+
+        function toggleInlineNoteBox() {
+            let box = document.getElementById('inlineNoteBox');
+            box.style.display = box.style.display === 'none' ? 'flex' : 'none';
+        }
+
+        function saveInlineNote() {
+            let title = document.getElementById('inlineNoteTitle').value.trim();
+            let content = document.getElementById('inlineNoteContent').value.trim();
+            if (title === "" && content === "") return;
+
+            let targetFolder = foldersData.find(f => f.name === activeFolderName);
+            if (targetFolder) {
+                targetFolder.items.push({
+                    query: title !== "" ? title : "Untitled Note",
+                    answer: marked.parse(content),
+                    category: "Save Note",
+                    date: new Date().toLocaleDateString()
+                });
+                saveDataToStorage();
+                document.getElementById('inlineNoteTitle').value = '';
+                document.getElementById('inlineNoteContent').value = '';
+                document.getElementById('inlineNoteBox').style.display = 'none';
+                renderFolderItems();
+                showToast("নোট সেভ করা হয়েছে!");
+            }
+        }
+
+        function renderFolderItems() {
+            let targetFolder = foldersData.find(f => f.name === activeFolderName);
+            if (!targetFolder || targetFolder.items.length === 0) {
+                folderItemsContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: 40px; font-size: 13px;">এই ফোল্ডারে কোনো আইটেম নেই।</div>`;
+                return;
+            }
+            let html = '';
+            targetFolder.items.forEach((item, index) => {
+                let displayCat = item.category === "Save Note" ? "Save Note" : item.category;
+                html += `
+                    <div class="saved-item-card">
+                        <button class="delete-item-btn" onclick="deleteFolderItem(${index})"><i class="fa-solid fa-trash"></i></button>
+                        <h4>${displayCat}</h4>
+                        <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 4px;">📅 ${item.date}</div>
+                        <p><b>Title:</b> ${item.query}</p>
+                        <div class="ans-box">${item.answer}</div>
+                    </div>
+                `;
+            });
+            folderItemsContainer.innerHTML = html;
+        }
+
+        function deleteFolderItem(index) {
+            let targetFolder = foldersData.find(f => f.name === activeFolderName);
+            if (targetFolder) {
+                targetFolder.items.splice(index, 1);
+                saveDataToStorage();
+                renderFolderItems();
+                showToast("আইটেম ডিলিট হয়েছে");
+            }
+        }
+
+        function openSaveToFolderModal() {
+            if (foldersData.length === 0) { showToast("প্রথমে ফোল্ডার তৈরি করুন!"); return; }
+            let html = '';
+            foldersData.forEach(folder => {
+                html += `<button class="modal-option-btn" onclick="saveToSpecificFolder('${folder.name}')"><i class="fa-solid fa-folder"></i> ${folder.name}</button>`;
+            });
+            document.getElementById('folderSelectionList').innerHTML = html;
+            document.getElementById('saveToFolderModal').style.display = 'flex';
+        }
+        function closeSaveToFolderModal() { document.getElementById('saveToFolderModal').style.display = 'none'; }
+
+        function saveToSpecificFolder(folderName) {
+            let targetFolder = foldersData.find(f => f.name === folderName);
+            if (targetFolder) {
+                targetFolder.items.push({
+                    query: currentAiQuery,
+                    answer: aiAnswerText.innerHTML,
+                    category: currentDisplayTitle,
+                    date: new Date().toLocaleDateString()
+                });
+                saveDataToStorage();
+                showToast(`"${folderName}" ফোল্ডারে সেভ হয়েছে!`);
+                closeSaveToFolderModal();
+            }
+        }
+
+        // --- মূল এপিআই রিকোয়েস্ট ফাংশন (আপডেট করা ও নিখুঁত) ---
+        async function getGeminiAnswer(originalQuery) {
+            currentAiQuery = originalQuery;
+            chatContainer.style.display = 'flex';
+            userQueryBubble.innerHTML = `Query: ${originalQuery}`;
+            aiAnswerText.innerHTML = `<span class="loading-spinner"></span>উত্তর তৈরি করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...`;
+
+            chatContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+            let promptText = originalQuery;
+            
+            if (currentCategoryKey === 'bangla_to_english') {
+                promptText = `Translate the following text accurately into professional English: "${originalQuery}"`;
+            } else if (currentCategoryKey === 'english_to_bangla') {
+                promptText = `Translate the following text accurately into fluent Bengali: "${originalQuery}"`;
+            } else if (currentCategoryKey === 'bangla_book') {
+                promptText = `আপনি বাংলা বইয়ের একজন বিশেষজ্ঞ শিক্ষক। নিচের প্রশ্নটির সম্পূর্ণ উত্তর এবং ব্যাখ্যা খাঁটি ও সহজ বাংলা ভাষায় প্রদান করুন: ${originalQuery}`;
+            } else if (currentCategoryKey === 'hindi_book') {
+                promptText = `आप हिंदी पुस्तक के एक विशेषज्ञ शिक्षक हैं। निम्नलिखित प्रश्न का उत्तर पूरी तरह से शुद्ध और स्पष्ट हिंदी भाषा में दें: ${originalQuery}`;
+            } else if (currentCategoryKey === 'math_book') {
+                promptText = `আপনি গণিতের একজন শিক্ষক। নিচের গাণিতিক সমস্যাটির স্টেপ-বাই-স্টেপ সমাধান সহজ বাংলায় বুঝিয়ে দিন: ${originalQuery}`;
+            } else if (currentCategoryKey === 'general_knowledge') {
+                promptText = `নিচের বিষয় বা প্রশ্নটির ওপর গুরুত্বপূর্ণ সাধারণ জ্ঞানের তথ্যগুলো পরিষ্কার পয়েন্ট আকারে বাংলায় উপস্থাপন করুন: ${originalQuery}`;
+            } else if (currentCategoryKey === 'arabic_book') {
+                promptText = `أنت معلم خبير في اللغة العربية. يرجى تقديم إجابة دقيقة وواضحة وسلسة باللغة العربية الفصحى للسؤال التالي: ${originalQuery}`;
+            } else if (currentCategoryKey === 'english_book' || currentCategoryKey === 'ENGLISH BOOK') {
+                promptText = `You are an expert English teacher. Provide a comprehensive, accurate, and professional response in English for the following query: ${originalQuery}`;
+            }
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${customApiKey}`;
+
+            let partsArray = [{ text: promptText }];
+            if (selectedBase64Image) {
+                partsArray.push({
+                    inlineData: {
+                        mimeType: selectedBase64Image.mimeType,
+                        data: selectedBase64Image.data
+                    }
+                });
+            }
+
+            const requestBody = {
+                contents: [
+                    {
+                        parts: partsArray
+                    }
+                ]
+            };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+                
+                selectedBase64Image = null;
+                document.getElementById('imagePreviewContainer').style.display = 'none';
+
+                if (data && data.candidates && data.candidates.length > 0 && data.candidates[0].content.parts.length > 0) {
+                    currentAiRawAnswer = data.candidates[0].content.parts[0].text;
+                    
+                    let parsedHtml = marked.parse(currentAiRawAnswer);
+                    aiAnswerText.innerHTML = parsedHtml;
+                    
+                    historyData.unshift({
+                        query: currentAiQuery,
+                        answer: aiAnswerText.innerHTML,
+                        category: currentDisplayTitle,
+                        date: new Date().toLocaleDateString()
+                    });
+                    if(historyData.length > 20) historyData.pop(); 
+                    saveDataToStorage();
+
+                    chatContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } else {
+                    aiAnswerText.innerHTML = "দুঃখিত, কোনো উত্তর পাওয়া যায়নি।";
+                }
+            } catch (error) {
+                console.error("ত্রুটি ঘটেছে:", error);
+                selectedBase64Image = null;
+                document.getElementById('imagePreviewContainer').style.display = 'none';
+                aiAnswerText.innerHTML = "নেটওয়ার্ক সমস্যা বা এপিআই এরর হয়েছে। অনুগ্রহ করে ইন্টারনেট কানেকশন চেক করুন।";
+            }
+        }
+
+        function copyAiAnswer(btn) {
+            navigator.clipboard.writeText(currentAiRawAnswer).then(() => {
+                let orig = btn.innerHTML;
+                btn.innerHTML = `<i class="fa-solid fa-check"></i> Copied!`;
+                showToast("ক্লিপবোর্ডে কপি করা হয়েছে!");
+                setTimeout(() => btn.innerHTML = orig, 2000);
+            });
+        }
+
+        // সাধারণ সার্চ ইমেজ হ্যান্ডলিং
+        function openImageOptionsModal() { document.getElementById('imageOptionsModal').style.display = 'flex'; }
+        function closeImageOptionsModal() { document.getElementById('imageOptionsModal').style.display = 'none'; }
+        function triggerDirectCamera() { closeImageOptionsModal(); document.getElementById('cameraCaptureInput').click(); }
+        function triggerGalleryFiles() { closeImageOptionsModal(); document.getElementById('galleryFileInput').click(); }
+        
+        function handleImageSelected(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(uploadEvent) {
+                    const base64String = uploadEvent.target.result.split(',')[1];
+                    selectedBase64Image = { mimeType: file.type, data: base64String };
+                    document.getElementById('previewImgTag').src = uploadEvent.target.result;
+                    document.getElementById('imagePreviewContainer').style.display = 'flex';
+                    catSearchInput.value = "[Attached Image Question]";
+                    getGeminiAnswer("Solve the problem or answer the question present in this attached image context.");
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function clearSelectedImage() {
+            selectedBase64Image = null;
+            document.getElementById('imagePreviewContainer').style.display = 'none';
+            catSearchInput.value = "";
+        }
+
+        // কুইজ পেজ ইমেজ হ্যান্ডলিং
+        function openQuizImageOptionsModal() { document.getElementById('quizImageOptionsModal').style.display = 'flex'; }
+        function closeQuizImageOptionsModal() { document.getElementById('quizImageOptionsModal').style.display = 'none'; }
+        function triggerQuizDirectCamera() { closeQuizImageOptionsModal(); document.getElementById('quizCameraCaptureInput').click(); }
+        function triggerQuizGalleryFiles() { closeQuizImageOptionsModal(); document.getElementById('quizGalleryFileInput').click(); }
+
+        function handleQuizImageSelected(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(uploadEvent) {
+                    const base64String = uploadEvent.target.result.split(',')[1];
+                    selectedQuizBase64Image = { mimeType: file.type, data: base64String };
+                    document.getElementById('quizPreviewImgTag').src = uploadEvent.target.result;
+                    document.getElementById('quizImagePreviewContainer').style.display = 'flex';
+                    quizTopicInput.value = "[Attached Quiz Image]";
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function clearQuizSelectedImage() {
+            selectedQuizBase64Image = null;
+            document.getElementById('quizImagePreviewContainer').style.display = 'none';
+            quizTopicInput.value = "";
+        }
+
+        // ফ্ল্যাশকার্ড পেজ ইমেজ হ্যান্ডলিং
+        function openFlashcardImageOptionsModal() { document.getElementById('flashcardImageOptionsModal').style.display = 'flex'; }
+        function closeFlashcardImageOptionsModal() { document.getElementById('flashcardImageOptionsModal').style.display = 'none'; }
+        function triggerFlashcardDirectCamera() { closeFlashcardImageOptionsModal(); document.getElementById('flashcardCameraCaptureInput').click(); }
+        function triggerFlashcardGalleryFiles() { closeFlashcardImageOptionsModal(); document.getElementById('flashcardGalleryFileInput').click(); }
+
+        function handleFlashcardImageSelected(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(uploadEvent) {
+                    const base64String = uploadEvent.target.result.split(',')[1];
+                    selectedFlashcardBase64Image = { mimeType: file.type, data: base64String };
+                    document.getElementById('flashcardPreviewImgTag').src = uploadEvent.target.result;
+                    document.getElementById('flashcardImagePreviewContainer').style.display = 'flex';
+                    flashcardTopicInput.value = "[Attached Flashcard Image]";
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function clearFlashcardSelectedImage() {
+            selectedFlashcardBase64Image = null;
+            document.getElementById('flashcardImagePreviewContainer').style.display = 'none';
+            flashcardTopicInput.value = "";
+        }
+    </script>
+</body>
+</html>
