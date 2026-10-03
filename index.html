@@ -35,7 +35,7 @@
     <section class="hero">
       <div class="eyebrow">FAST · SIMPLE · SECURE</div>
       <h2>Video links to <span class="gradient">downloads.</span></h2>
-      <p>ভিডিও লিংক পেস্ট করুন। আগে সরাসরি ভিডিও ফাইল পরীক্ষা হবে, প্রয়োজন হলে RapidAPI চেষ্টা করবে।</p>
+      <p>ভিডিও লিংক পেস্ট করুন। আগে সরাসরি ভিডিও ফাইল পরীক্ষা হবে, প্রয়োজন হলে SaveAPI চেষ্টা করবে।</p>
     </section>
 
     <section class="card" aria-label="Video downloader">
@@ -53,7 +53,7 @@
 
       <div class="steps">
         <div class="step"><div class="ico">⚡</div><strong>Direct Check</strong><span>আগে সরাসরি চেষ্টা</span></div>
-        <div class="step"><div class="ico">🔎</div><strong>API Fallback</strong><span>প্রয়োজনে RapidAPI</span></div>
+        <div class="step"><div class="ico">🔎</div><strong>API Fallback</strong><span>প্রয়োজনে SaveAPI</span></div>
         <div class="step"><div class="ico">📥</div><strong>Save Video</strong><span>ফোনের Downloads</span></div>
       </div>
       <div class="note"><b>মনে রাখবেন:</b> সব ওয়েবসাইট সমর্থিত নয়। লগইন, DRM, পেইড বা অনুমতিহীন কনটেন্টের সুরক্ষা এড়িয়ে ডাউনলোড করা হয় না। বড় ফাইলের ডাউনলোড শেষ হলে ফোনের Downloads ফোল্ডার দেখুন; Gallery-তে দেখা যাবে কি না Android-এর ফাইল-স্ক্যানিংয়ের ওপর নির্ভর করে।</div>
@@ -118,7 +118,7 @@ function renderHistory() {
     return `<article class="historyitem">
       <div class="histicon">▶</div>
       <div class="histmeta"><strong>${escapeHtml(item.title || "Video download")}</strong>
-      <small>${escapeHtml(host)} · ${escapeHtml(date)} · ${item.method === "direct" ? "Direct" : "RapidAPI"}</small></div>
+      <small>${escapeHtml(host)} · ${escapeHtml(date)} · ${item.method === "direct" ? "Direct" : "SaveAPI"}</small></div>
       <button class="again" type="button" data-index="${index}">AGAIN</button>
     </article>`;
   }).join("");
@@ -162,7 +162,7 @@ async function startDownload() {
     let data;
     try { data = await response.json(); } catch { data = {}; }
     if (!response.ok || !data.ok || !data.token) throw new Error(data.error || "ভিডিও লিংক প্রস্তুত করা যায়নি।");
-    const methodText = data.method === "direct" ? "সরাসরি ভিডিও লিংক পাওয়া গেছে" : "সরাসরি পদ্ধতি কাজ করেনি—RapidAPI থেকে লিংক পাওয়া গেছে";
+    const methodText = data.method === "direct" ? "সরাসরি ভিডিও লিংক পাওয়া গেছে" : "সরাসরি পদ্ধতি কাজ করেনি—SaveAPI থেকে লিংক পাওয়া গেছে";
     showStatus(`${methodText}। ডাউনলোড শুরু হচ্ছে… ফোনের Downloads ফোল্ডার পরীক্ষা করুন।`, "success");
     saveHistory(url, data.title || "Video", data.method);
     const a = document.createElement("a");

@@ -11,8 +11,7 @@ const { Readable } = require("node:stream");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || "";
-const RAPIDAPI_HOST = "auto-download-all-in-one.p.rapidapi.com";
+const SAVEAPI_KEY = process.env.SAVEAPI_KEY || process.env.SAVEAPI_API_KEY || "";
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 const MAX_REDIRECTS = 5;
 const prepared = new Map();
@@ -36,7 +35,11 @@ app.use(helmet({
   }
 }));
 app.use(express.json({ limit: "8kb" }));
-app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
+const PUBLIC_DIR = path.join(__dirname, "public");
+const ROOT_INDEX = path.join(__dirname, "index.html");
+const PUBLIC_INDEX = path.join(PUBLIC_DIR, "index.html");
+const INDEX_FILE = require("node:fs").existsSync(PUBLIC_INDEX) ? PUBLIC_INDEX : ROOT_INDEX;
+app.use(express.static(require("node:fs").existsSync(PUBLIC_DIR) ? PUBLIC_DIR : __dirname, { extensions: ["html"] }));
 
 const prepareLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -168,7 +171,7 @@ setInterval(() => {
 }, 60_000).unref();
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "EM Fast 4K", rapidApiConfigured: Boolean(RAPIDAPI_KEY) });
+  res.json({ ok: true, service: "EM Fast 4K", saveApiConfigured: Boolean(SAVEAPI_KEY) });
 });
 
 app.post("/api/prepare", async (req, res) => {
@@ -187,41 +190,46 @@ app.post("/api/prepare", async (req, res) => {
       return res.json({ ok: true, token, title: titleFromUrl(direct.url), method: "direct" });
     }
 
-    if (!RAPIDAPI_KEY) {
+    if (!SAVEAPI_KEY) {
       return res.status(503).json({
-        error: "এই লিংকটি সরাসরি ভিডিও নয় এবং RapidAPI Key সেট করা নেই। Render-এর Environment Variables-এ RAPIDAPI_KEY যোগ করুন।"
+        error: "এই লিংকটি সরাসরি ভিডিও ফাইল নয়। Render → Environment Variables-এ SAVEAPI_KEY যোগ করে SaveAPI key দিন।"
       });
     }
 
-    const apiUrl = `https://${RAPIDAPI_HOST}/v1/social/autolink?url=${encodeURIComponent(inputUrl)}`;
+    const apiUrl = `https://api.saveapi.org/v1/download?url=${encodeURIComponent(inputUrl)}`;
     const apiResponse = await fetch(apiUrl, {
       method: "GET",
-      headers: { "X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": RAPIDAPI_HOST },
-      signal: AbortSignal.timeout(25000)
+      headers: { "Authorization": `Bearer ${SAVEAPI_KEY}`, "Accept": "application/json" },
+      signal: AbortSignal.timeout(30000)
     });
     let data;
     try { data = await apiResponse.json(); } catch { data = null; }
-    if (!apiResponse.ok) {
+    if (!apiResponse.ok || data?.success === false) {
+      const code = data?.error?.code || "";
       const statusMessage = apiResponse.status === 429
-        ? "RapidAPI-তে অনুরোধের সীমা শেষ হয়েছে। আপনার API প্ল্যান পরীক্ষা করুন।"
-        : `RapidAPI অনুরোধ সফল হয়নি (HTTP ${apiResponse.status})।`;
+        ? "SaveAPI-এর ফ্রি রেট লিমিট আপাতত শেষ। কিছুক্ষণ পরে আবার চেষ্টা করুন।"
+        : apiResponse.status === 401
+          ? "SaveAPI key সঠিক নয়। Render-এর SAVEAPI_KEY মানটি পরীক্ষা করুন।"
+          : code === "UNSUPPORTED_PLATFORM"
+            ? "এই ভিডিও সাইট SaveAPI সমর্থন করে না।"
+            : (data?.error?.message || `SaveAPI অনুরোধ সফল হয়নি (HTTP ${apiResponse.status})।`);
       return res.status(apiResponse.status === 429 ? 429 : 502).json({ error: statusMessage });
     }
     const media = Array.isArray(data?.medias)
-      ? data.medias.find(item => item && typeof item.url === "string" && /^https?:\/\//i.test(item.url))
+      ? data.medias.find(item => item && item.type !== "audio" && typeof item.url === "string" && /^https?:\/\//i.test(item.url))
       : null;
     if (!media) {
-      return res.status(422).json({ error: "এই সাইটের ভিডিও RapidAPI খুঁজে পায়নি বা লিংকটি সমর্থিত নয়।" });
+      return res.status(422).json({ error: "SaveAPI এই লিংকের জন্য ভিডিও ফাইল খুঁজে পায়নি। অন্য পাবলিক লিংক চেষ্টা করুন।" });
     }
     await assertPublicHttpUrl(media.url);
-    const title = cleanFileName(data.title || titleFromUrl(inputUrl));
+    const title = cleanFileName(data?.meta?.title || data?.title || titleFromUrl(inputUrl));
     const token = makeToken({
       url: media.url,
       title,
-      source: "rapidapi",
-      contentType: media.type || media.mimeType || "application/octet-stream"
+      source: "saveapi",
+      contentType: media.mime_type || media.mimeType || (media.ext ? `video/${media.ext}` : "application/octet-stream")
     });
-    return res.json({ ok: true, token, title, method: "rapidapi" });
+    return res.json({ ok: true, token, title, method: "saveapi" });
   } catch (error) {
     const message = error?.name === "TimeoutError"
       ? "সাইটের উত্তর পেতে বেশি সময় লাগছে। আবার চেষ্টা করুন।"
@@ -283,7 +291,7 @@ app.get("/api/file/:token", async (req, res) => {
 
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api/")) return next();
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.sendFile(INDEX_FILE, (err) => { if (err && !res.headersSent) res.status(404).send("index.html পাওয়া যায়নি। GitHub-এ index.html মূল ফোল্ডারে অথবা public/index.html-এ রাখুন।"); });
 });
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err.message);
@@ -292,5 +300,5 @@ app.use((err, _req, res, _next) => {
 
 app.listen(PORT, () => {
   console.log(`EM Fast 4K running on port ${PORT}`);
-  if (!RAPIDAPI_KEY) console.warn("RAPIDAPI_KEY is not set. Direct video URLs can still work.");
+  if (!SAVEAPI_KEY) console.warn("SAVEAPI_KEY is not set. Direct video URLs can still work; social links need SaveAPI.");
 });

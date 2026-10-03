@@ -2,7 +2,7 @@
   "name": "em-fast-4k-downloader",
   "version": "1.0.0",
   "private": true,
-  "description": "EM Fast 4K video link resolver and downloader for Render",
+  "description": "EM Fast 4K video link resolver and SaveAPI downloader for Render",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
