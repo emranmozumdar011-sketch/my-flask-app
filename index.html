@@ -240,7 +240,6 @@ body{min-height:100dvh;min-height:100svh;align-items:center;justify-content:cent
   .header-title{font-size:20px!important}
 }
 </style>
-<style id="final-download-message-position">#errorNotice{position:relative!important;transform:translateY(-12px)!important;margin-top:-12px!important;z-index:20!important}@media(max-height:650px){#errorNotice{transform:translateY(-10px)!important;margin-top:-10px!important}}</style>
 </head><body>
 <main class="phone-container">
 <div class="top-section"><div class="top-crown" aria-hidden="true">♛</div><div class="header-plaque"><div class="header-side-logo left" aria-label="Premium crown logo"><span class="side-symbol">♛</span><span class="side-caption">PREMIUM</span></div><div class="header-brand-center"><div id="headerTitle" class="header-title">EM Fast 4K</div><div class="header-subtitle">Beyond Every Frame</div></div><div class="header-side-logo right" aria-label="4K video logo"><span class="side-symbol">▶</span><span class="side-caption">4K VIDEO</span></div></div></div>
@@ -254,13 +253,87 @@ body{min-height:100dvh;min-height:100svh;align-items:center;justify-content:cent
 </main>
 <script>
 const $=id=>document.getElementById(id), input=$("linkInput"), title=$("headerTitle"), bar=$("progressBar"), pct=$("percentageText"), videos=$("videosWrapper"), modal=$("historyModal"), list=$("historyList"), btn=$("downloadBtn"), errorBox=$("errorNotice");
-const HISTORY_KEY="em_download_history", TTL=3600000;let busy=false, timer=null;
+const HISTORY_KEY="em_download_history", TTL=60*60*1000;let busy=false, timer=null;
 function historyRead(){try{let a=JSON.parse(localStorage.getItem(HISTORY_KEY)||"[]");if(!Array.isArray(a))return[];let n=Date.now(),b=a.filter(x=>{let t=Date.parse(x.date||"");return Number.isFinite(t)&&n>=t&&n-t<TTL});if(b.length!==a.length)localStorage.setItem(HISTORY_KEY,JSON.stringify(b));return b}catch{return[]}}
 function historySave(url,name,method){let a=historyRead();a.unshift({url,title:name,method,date:new Date().toISOString()});localStorage.setItem(HISTORY_KEY,JSON.stringify(a.slice(0,20)));renderHistory()}
 function renderHistory(){let a=historyRead();list.innerHTML="";if(!a.length){list.innerHTML='<div class="no-history">কোনো ডাউনলোড হিস্ট্রি পাওয়া যায়নি!</div>';return}a.forEach(x=>{let d=document.createElement("div");d.className="history-item";let n=document.createElement("div");n.className="history-item-name";n.textContent="📁 "+(x.title||"EM_Video");let dt=document.createElement("div");dt.className="history-item-date";dt.textContent="তারিখ: "+new Date(x.date).toLocaleString();let u=document.createElement("div");u.className="history-item-url";u.textContent="লিংক: "+x.url;let b=document.createElement("button");b.className="download-btn-item";b.textContent="💾 আবার ডাউনলোড করুন";b.onclick=()=>{input.value=x.url;modal.style.display="none";startDownload()};d.append(n,dt,u,b);list.append(d)})}
 function progress(n){bar.style.width=n+"%";pct.textContent=n+"%"}function validUrl(s){try{return["http:","https:"].includes(new URL(s).protocol)}catch{return false}}
 function startDownload(){if(busy)return;errorBox.textContent="";if(!validUrl(input.value.trim())){errorBox.textContent="⚠️ Please provide a valid video link.";return}downloadActual()}
-async function downloadActual(){let url=input.value.trim();busy=true;btn.disabled=true;btn.textContent="PROCESSING…";title.textContent="Fetching Link…";title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";title.style.webkitBackgroundClip="text";title.style.webkitTextFillColor="transparent";videos.classList.remove("active-smoke");progress(0);let pollTimer=null,iframe=null;try{let r=await fetch("/api/prepare",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});let d={};try{d=await r.json()}catch{}if(!r.ok||!d.ok||!d.token)throw new Error(d.error||`Download could not be prepared (HTTP ${r.status})`);historySave(url,d.title||"EM_Video",d.method||"direct");title.textContent="DOWNLOADING…";const fileUrl="/api/file/"+encodeURIComponent(d.token);iframe=document.createElement("iframe");iframe.style.display="none";iframe.setAttribute("aria-hidden","true");iframe.src=fileUrl;document.body.appendChild(iframe);pollTimer=setInterval(async()=>{try{const pr=await fetch("/api/download-progress/"+encodeURIComponent(d.token),{cache:"no-store"});const pd=await pr.json();if(pd.ok&&pd.total>0)progress(Math.min(99,Math.floor(pd.bytes/pd.total*100)));if(pd.done){clearInterval(pollTimer);pollTimer=null;progress(100);title.textContent="COMPLETED";title.style.background="none";title.style.webkitTextFillColor="#00ff88";title.style.filter="drop-shadow(0 0 10px #00ff88b3)";videos.classList.add("active-smoke");setTimeout(()=>iframe&&iframe.remove(),3000)}}catch{}}},250);await new Promise((resolve,reject)=>{const check=setInterval(async()=>{try{const q=await fetch("/api/download-progress/"+encodeURIComponent(d.token),{cache:"no-store"});const x=await q.json();if(x.done){clearInterval(check);resolve()}else if(x.error){clearInterval(check);reject(new Error(x.error))}}catch(e){clearInterval(check);reject(e)}},500);setTimeout(()=>{clearInterval(check);reject(new Error("Download timed out."))},60*60*1000)})}catch(e){if(pollTimer)clearInterval(pollTimer);if(iframe)iframe.remove();errorBox.textContent="⚠️ "+(e.message||"Download failed.");title.textContent="EM Fast 4K";title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";title.style.webkitBackgroundClip="text";title.style.webkitTextFillColor="transparent";progress(0)}finally{setTimeout(()=>{input.value="";busy=false;btn.disabled=false;btn.textContent="DOWNLOAD";progress(0)},2500)}}
+window.startDownload=startDownload;
+async function downloadActual(){
+  const url=input.value.trim();
+  busy=true;
+  btn.disabled=true;
+  btn.textContent="PROCESSING…";
+  errorBox.textContent="";
+  title.textContent="FETCHING LINK…";
+  title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
+  title.style.webkitBackgroundClip="text";
+  title.style.webkitTextFillColor="transparent";
+  title.style.filter="none";
+  videos.classList.remove("active-smoke");
+  progress(10);
+
+  try{
+    const r=await fetch("/api/prepare",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({url})
+    });
+
+    let d={};
+    try{d=await r.json()}catch{}
+    if(!r.ok||!d.ok||!d.directUrl){
+      throw new Error(d.error||`Unable to prepare the download (HTTP ${r.status})`);
+    }
+    if(Number.isFinite(Number(d.size)) && Number(d.size)>5*1024*1024*1024){
+      throw new Error("Maximum file size is 5 GB.");
+    }
+
+    progress(70);
+    historySave(url,d.title||"EM_Video",d.method||"direct");
+
+    title.textContent="DOWNLOADING…";
+    title.style.background="none";
+    title.style.webkitTextFillColor="#00ff88";
+    title.style.filter="drop-shadow(0 0 10px #00ff88b3)";
+    videos.classList.add("active-smoke");
+    btn.textContent="DOWNLOADING…";
+    progress(90);
+
+    // The video bytes are NOT routed through Render.
+    // The browser downloads the final direct/original URL itself.
+    const a=document.createElement("a");
+    a.href=d.directUrl;
+    a.download=(d.title||"EM-Fast-4K-Video")+".mp4";
+    a.rel="noopener";
+    a.target="_blank";
+    document.body.append(a);
+    a.click();
+    a.remove();
+    progress(100);
+
+    setTimeout(()=>{
+      input.value="";
+      busy=false;
+      btn.disabled=false;
+      btn.textContent="DOWNLOAD";
+      progress(0);
+    },3500);
+  }catch(e){
+    errorBox.textContent="⚠️ "+(e.message||"Unable to process the video link");
+    title.textContent="EM Fast 4K";
+    title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
+    title.style.webkitBackgroundClip="text";
+    title.style.webkitTextFillColor="transparent";
+    title.style.filter="none";
+    videos.classList.remove("active-smoke");
+    progress(0);
+    busy=false;
+    btn.disabled=false;
+    btn.textContent="DOWNLOAD";
+  }
+}
 videos.onclick=()=>{renderHistory();modal.style.display="flex"};videos.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();renderHistory();modal.style.display="flex"}};$("closeModal").onclick=()=>modal.style.display="none";input.onkeydown=e=>{if(e.key==="Enter")startDownload()};renderHistory();
 </script>
 <style id="verified-final-two-fixes">
@@ -471,6 +544,19 @@ videos.onclick=()=>{renderHistory();modal.style.display="flex"};videos.onkeydown
   50%{opacity:.9;transform:translate(-50%,-50%) scale(1.12);filter:brightness(1.45)}
 }
 @media(max-height:650px){.subtle-sparkles span{width:4px;height:4px;box-shadow:0 0 3px 1px #fff,0 0 7px 2px #ffd66b}}
+</style>
+
+<style id="final-error-message-position">
+/* Keep failure/validation text clearly ABOVE the DOWNLOAD button. */
+#errorNotice{
+  position:relative!important;
+  z-index:30!important;
+  transform:translateY(-28px)!important;
+  pointer-events:none!important;
+}
+@media(max-height:650px){
+  #errorNotice{transform:translateY(-22px)!important;}
+}
 </style>
 </body></html>
 <style id="em-fast-4k-clear-silver-subtitle">
