@@ -1,5 +1,3 @@
-// EM Fast 4K — Render Web Service
-// API keys belong in Render Environment Variables, never in public HTML.
 const express = require("express");
 const helmet = require("helmet");
 const { rateLimit } = require("express-rate-limit");
@@ -10,269 +8,268 @@ const crypto = require("node:crypto");
 const { Readable } = require("node:stream");
 
 const app = express();
+
 const PORT = process.env.PORT || 3000;
-const SAVEAPI_KEY = process.env.SAVEAPI_KEY || process.env.SAVEAPI_API_KEY || "";
+const SAVEAPI_KEY =
+  process.env.SAVEAPI_KEY ||
+  process.env.SAVEAPI_API_KEY ||
+  "";
+
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 const MAX_REDIRECTS = 5;
+
 const prepared = new Map();
 
 app.disable("x-powered-by");
-app.set("trust proxy", 1);
 
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-      upgradeInsecureRequests: null
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        mediaSrc: ["'self'", "blob:", "https:"],
+        connectSrc: ["'self'", "https:"],
+        fontSrc: ["'self'", "data:", "https:"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'self'"]
+      }
     }
-  }
-}));
+  })
+);
 
 app.use(express.json({ limit: "8kb" }));
 
-const PUBLIC_DIR = path.join(__dirname, "public");
-const ROOT_INDEX = path.join(__dirname, "index.html");
-const PUBLIC_INDEX = path.join(PUBLIC_DIR, "index.html");
-const INDEX_FILE = require("node:fs").existsSync(PUBLIC_INDEX)
-  ? PUBLIC_INDEX
-  : ROOT_INDEX;
-
-app.use(
-  express.static(
-    require("node:fs").existsSync(PUBLIC_DIR) ? PUBLIC_DIR : __dirname,
-    { extensions: ["html"] }
-  )
-);
-
 const prepareLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 120,
-  standardHeaders: "draft-7",
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-8",
   legacyHeaders: false,
   message: {
-    error: "অনেক বেশি অনুরোধ হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।"
+    error: "Too many requests. Please wait a moment and try again."
   }
 });
 
 app.use("/api/prepare", prepareLimiter);
 
+const fs = require("node:fs");
+
+const PUBLIC_DIR = path.join(__dirname, "public");
+const ROOT_INDEX = path.join(__dirname, "index.html");
+const PUBLIC_INDEX = path.join(PUBLIC_DIR, "index.html");
+
+const INDEX_FILE = fs.existsSync(PUBLIC_INDEX)
+  ? PUBLIC_INDEX
+  : ROOT_INDEX;
+
+app.use(
+  express.static(
+    fs.existsSync(PUBLIC_DIR)
+      ? PUBLIC_DIR
+      : __dirname,
+    {
+      extensions: ["html"]
+    }
+  )
+);
+
 function isPrivateIPv4(ip) {
   const parts = ip.split(".").map(Number);
 
-  if (
-    parts.length !== 4 ||
-    parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)
-  ) {
+  if (parts.length !== 4 || parts.some(Number.isNaN)) {
     return true;
   }
 
   const [a, b] = parts;
 
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    a >= 224 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    (a === 198 && b === 51) ||
-    (a === 203 && b === 0)
-  );
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+
+  return false;
 }
 
 function isPrivateIPv6(ip) {
-  const value = ip.toLowerCase().split("%")[0];
+  const value = ip.toLowerCase();
 
-  return (
-    value === "::" ||
-    value === "::1" ||
-    value.startsWith("fc") ||
-    value.startsWith("fd") ||
-    value.startsWith("fe80:") ||
-    value.startsWith("ff") ||
-    value.startsWith("::ffff:127.") ||
-    value.startsWith("::ffff:10.") ||
-    value.startsWith("::ffff:192.168.")
-  );
+  if (value === "::1") return true;
+  if (value.startsWith("fc")) return true;
+  if (value.startsWith("fd")) return true;
+  if (value.startsWith("fe80:")) return true;
+
+  if (value.startsWith("::ffff:")) {
+    const mapped = value.substring(7);
+
+    if (net.isIP(mapped) === 4) {
+      return isPrivateIPv4(mapped);
+    }
+  }
+
+  return false;
 }
 
-async function assertPublicHttpUrl(input) {
-  let u;
+async function assertPublicHttpUrl(value) {
+  let url;
 
   try {
-    u = new URL(input);
+    url = new URL(value);
   } catch {
-    throw new Error("সঠিক ভিডিও লিংক দিন।");
+    throw new Error("Invalid URL.");
   }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("Only HTTP and HTTPS URLs are supported.");
+  }
+
+  if (url.username || url.password) {
+    throw new Error("URLs containing username or password are not allowed.");
+  }
+
+  const hostname = url.hostname.toLowerCase();
 
   if (
-    !["http:", "https:"].includes(u.protocol) ||
-    u.username ||
-    u.password
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local")
   ) {
-    throw new Error("শুধু সাধারণ HTTP/HTTPS লিংক ব্যবহার করুন।");
+    throw new Error("Private/local URLs are not allowed.");
   }
 
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const addresses = await dns.lookup(hostname, {
+    all: true,
+    verbatim: true
+  });
 
-  if (
-    !host ||
-    host === "localhost" ||
-    host.endsWith(".localhost") ||
-    host.endsWith(".local")
-  ) {
-    throw new Error("এই ঠিকানাটি গ্রহণ করা যাচ্ছে না।");
+  if (!addresses.length) {
+    throw new Error("The video host could not be resolved.");
   }
 
-  const ipType = net.isIP(host);
-
-  if (ipType === 4 && isPrivateIPv4(host)) {
-    throw new Error("এই ঠিকানাটি গ্রহণ করা যাচ্ছে না।");
-  }
-
-  if (ipType === 6 && isPrivateIPv6(host)) {
-    throw new Error("এই ঠিকানাটি গ্রহণ করা যাচ্ছে না।");
-  }
-
-  if (!ipType) {
-    let records;
-
-    try {
-      records = await dns.lookup(host, {
-        all: true,
-        verbatim: true
-      });
-    } catch {
-      throw new Error("এই সাইটের ঠিকানা খুঁজে পাওয়া যায়নি।");
+  for (const item of addresses) {
+    if (net.isIP(item.address) === 4 && isPrivateIPv4(item.address)) {
+      throw new Error("Private network addresses are not allowed.");
     }
 
-    if (
-      !records.length ||
-      records.some(r =>
-        r.family === 4
-          ? isPrivateIPv4(r.address)
-          : isPrivateIPv6(r.address)
-      )
-    ) {
-      throw new Error("এই সাইটের ঠিকানা নিরাপদ নয়।");
+    if (net.isIP(item.address) === 6 && isPrivateIPv6(item.address)) {
+      throw new Error("Private network addresses are not allowed.");
     }
   }
 
-  return u;
+  return url;
 }
 
 async function fetchWithSafeRedirects(
-  inputUrl,
-  options = {},
-  maxRedirects = MAX_REDIRECTS
+  initialUrl,
+  options = {}
 ) {
-  let current = inputUrl;
+  let currentUrl = initialUrl;
 
-  for (let i = 0; i <= maxRedirects; i++) {
-    await assertPublicHttpUrl(current);
+  for (let i = 0; i <= MAX_REDIRECTS; i++) {
+    await assertPublicHttpUrl(currentUrl);
 
-    const response = await fetch(current, {
+    const response = await fetch(currentUrl, {
       ...options,
       redirect: "manual",
-      signal: options.signal || AbortSignal.timeout(20000),
-      headers: {
-        "user-agent": "EMFast4K/1.0",
-        ...(options.headers || {})
-      }
+      signal:
+        options.signal ||
+        AbortSignal.timeout(20_000)
     });
 
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
+    if (
+      [301, 302, 303, 307, 308].includes(
+        response.status
+      )
+    ) {
       const location = response.headers.get("location");
 
       await response.body?.cancel().catch(() => {});
 
-      if (!location || i === maxRedirects) {
-        throw new Error("সাইটের রিডাইরেক্ট সম্পন্ন করা যায়নি।");
+      if (!location) {
+        throw new Error("Redirect location missing.");
       }
 
-      current = new URL(location, current).toString();
+      currentUrl = new URL(
+        location,
+        currentUrl
+      ).toString();
+
       continue;
     }
 
     return {
       response,
-      finalUrl: current
+      finalUrl: currentUrl
     };
   }
 
-  throw new Error("অনেকগুলো রিডাইরেক্ট হয়েছে।");
+  throw new Error("Too many redirects.");
 }
 
 const VIDEO_EXT =
-  /\.(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|3gp|ogv)$/i;
+  /\.(mp4|m4v|webm|mov|mkv|avi|flv|wmv|mpeg?|3gp)(?:$|[?#])/i;
 
 function looksLikeVideo(response, url) {
-  const type = (
-    response.headers.get("content-type") || ""
-  ).toLowerCase();
+  const type =
+    response.headers.get("content-type") || "";
 
-  let pathname = "";
+  if (type.toLowerCase().startsWith("video/")) {
+    return true;
+  }
 
-  try {
-    pathname = new URL(url).pathname;
-  } catch {}
-
-  return (
-    type.startsWith("video/") ||
-    (type === "application/octet-stream" && VIDEO_EXT.test(pathname)) ||
-    VIDEO_EXT.test(pathname)
-  );
+  return VIDEO_EXT.test(url);
 }
 
-async function probeDirectVideo(url) {
+async function probeDirectVideo(inputUrl) {
   try {
-    const {
-      response,
-      finalUrl
-    } = await fetchWithSafeRedirects(url, {
-      method: "HEAD"
-    });
+    let result = await fetchWithSafeRedirects(
+      inputUrl,
+      {
+        method: "HEAD",
+        signal: AbortSignal.timeout(15_000)
+      }
+    );
 
-    const direct =
-      response.ok && looksLikeVideo(response, finalUrl);
+    let response = result.response;
+    let finalUrl = result.finalUrl;
+
+    let direct =
+      (response.ok || response.status === 206) &&
+      looksLikeVideo(response, finalUrl);
 
     await response.body?.cancel().catch(() => {});
 
     if (direct) {
+      const type =
+        response.headers.get("content-type") ||
+        "video/mp4";
+
       return {
         direct: true,
         url: finalUrl,
-        type:
-          response.headers.get("content-type") ||
-          "video/mp4"
+        type
       };
     }
-  } catch {}
 
-  try {
-    const {
-      response,
-      finalUrl
-    } = await fetchWithSafeRedirects(url, {
-      method: "GET",
-      headers: {
-        Range: "bytes=0-0"
+    result = await fetchWithSafeRedirects(
+      inputUrl,
+      {
+        method: "GET",
+        headers: {
+          Range: "bytes=0-0"
+        },
+        signal: AbortSignal.timeout(15_000)
       }
-    });
+    );
 
-    const direct =
+    response = result.response;
+    finalUrl = result.finalUrl;
+
+    direct =
       (response.ok || response.status === 206) &&
       looksLikeVideo(response, finalUrl);
 
@@ -300,7 +297,10 @@ function cleanFileName(value) {
   const cleaned = String(
     value || "EM-Fast-4K-Video"
   )
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
+    .replace(
+      /[<>:"/\\|?*\u0000-\u001F]/g,
+      "_"
+    )
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
@@ -320,8 +320,10 @@ function titleFromUrl(value) {
     );
 
     return cleanFileName(
-      last.replace(/\.[a-z0-9]{2,5}$/i, "") ||
-      u.hostname
+      last.replace(
+        /\.[a-z0-9]{2,5}$/i,
+        ""
+      ) || u.hostname
     );
   } catch {
     return "EM-Fast-4K-Video";
@@ -329,11 +331,13 @@ function titleFromUrl(value) {
 }
 
 function makeToken(entry) {
-  const token = crypto.randomBytes(24).toString("hex");
+  const token =
+    crypto.randomBytes(24).toString("hex");
 
   prepared.set(token, {
     ...entry,
-    expiresAt: Date.now() + TOKEN_TTL_MS
+    expiresAt:
+      Date.now() + TOKEN_TTL_MS
   });
 
   return token;
@@ -358,9 +362,8 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.post("/api/prepare", async (req, res) => {
-  const inputUrl = String(
-    req.body?.url || ""
-  ).trim();
+  const inputUrl =
+    String(req.body?.url || "").trim();
 
   if (!inputUrl || inputUrl.length > 3000) {
     return res.status(400).json({
@@ -371,12 +374,20 @@ app.post("/api/prepare", async (req, res) => {
   try {
     await assertPublicHttpUrl(inputUrl);
 
-    const direct = await probeDirectVideo(inputUrl);
+    /*
+      প্রথমে সরাসরি ভিডিও URL খোঁজা হবে।
+      Direct video পাওয়া গেলে SaveAPI ব্যবহার হবে না।
+    */
+    const direct =
+      await probeDirectVideo(inputUrl);
 
     if (direct.direct) {
+      const title =
+        titleFromUrl(direct.url);
+
       const token = makeToken({
         url: direct.url,
-        title: titleFromUrl(direct.url),
+        title,
         source: "direct",
         contentType: direct.type
       });
@@ -384,11 +395,14 @@ app.post("/api/prepare", async (req, res) => {
       return res.json({
         ok: true,
         token,
-        title: titleFromUrl(direct.url),
+        title,
         method: "direct"
       });
     }
 
+    /*
+      Direct video না পেলে তবেই SaveAPI ব্যবহার হবে।
+    */
     if (!SAVEAPI_KEY) {
       return res.status(503).json({
         error:
@@ -397,16 +411,24 @@ app.post("/api/prepare", async (req, res) => {
     }
 
     const apiUrl =
-      `https://api.saveapi.org/v1/download?url=${encodeURIComponent(inputUrl)}`;
+      `https://api.saveapi.org/v1/download?url=${encodeURIComponent(
+        inputUrl
+      )}`;
 
-    const apiResponse = await fetch(apiUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${SAVEAPI_KEY}`,
-        "Accept": "application/json"
-      },
-      signal: AbortSignal.timeout(30000)
-    });
+    const apiResponse = await fetch(
+      apiUrl,
+      {
+        method: "GET",
+        headers: {
+          Authorization:
+            `Bearer ${SAVEAPI_KEY}`,
+          Accept:
+            "application/json"
+        },
+        signal:
+          AbortSignal.timeout(30_000)
+      }
+    );
 
     let data;
 
@@ -416,37 +438,49 @@ app.post("/api/prepare", async (req, res) => {
       data = null;
     }
 
-    if (!apiResponse.ok || data?.success === false) {
-      const code = data?.error?.code || "";
+    if (
+      !apiResponse.ok ||
+      data?.success === false
+    ) {
+      const code =
+        data?.error?.code || "";
 
       const statusMessage =
         apiResponse.status === 429
           ? "SaveAPI-এর ফ্রি রেট লিমিট আপাতত শেষ। কিছুক্ষণ পরে আবার চেষ্টা করুন।"
           : apiResponse.status === 401
-            ? "SaveAPI key সঠিক নয়। Render-এর SAVEAPI_KEY মানটি পরীক্ষা করুন।"
-            : code === "UNSUPPORTED_PLATFORM"
-              ? "এই ভিডিও সাইট SaveAPI সমর্থন করে না।"
-              : (
-                data?.error?.message ||
-                `SaveAPI অনুরোধ সফল হয়নি (HTTP ${apiResponse.status})।`
-              );
+          ? "SaveAPI key সঠিক নয়। Render-এর SAVEAPI_KEY মানটি পরীক্ষা করুন।"
+          : code ===
+            "UNSUPPORTED_PLATFORM"
+          ? "এই ভিডিও সাইট SaveAPI সমর্থন করে না।"
+          : (
+              data?.error?.message ||
+              `SaveAPI অনুরোধ সফল হয়নি (HTTP ${apiResponse.status})।`
+            );
 
       return res
-        .status(apiResponse.status === 429 ? 429 : 502)
+        .status(
+          apiResponse.status === 429
+            ? 429
+            : 502
+        )
         .json({
           error: statusMessage
         });
     }
 
-    const media = Array.isArray(data?.medias)
-      ? data.medias.find(
-          item =>
-            item &&
-            item.type !== "audio" &&
-            typeof item.url === "string" &&
-            /^https?:\/\//i.test(item.url)
-        )
-      : null;
+    const media =
+      Array.isArray(data?.medias)
+        ? data.medias.find(
+            item =>
+              item &&
+              item.type !== "audio" &&
+              typeof item.url === "string" &&
+              /^https?:\/\//i.test(
+                item.url
+              )
+          )
+        : null;
 
     if (!media) {
       return res.status(422).json({
@@ -455,12 +489,14 @@ app.post("/api/prepare", async (req, res) => {
       });
     }
 
-    await assertPublicHttpUrl(media.url);
+    await assertPublicHttpUrl(
+      media.url
+    );
 
     const title = cleanFileName(
       data?.meta?.title ||
-      data?.title ||
-      titleFromUrl(inputUrl)
+        data?.title ||
+        titleFromUrl(inputUrl)
     );
 
     const token = makeToken({
@@ -470,9 +506,11 @@ app.post("/api/prepare", async (req, res) => {
       contentType:
         media.mime_type ||
         media.mimeType ||
-        (media.ext
-          ? `video/${media.ext}`
-          : "application/octet-stream")
+        (
+          media.ext
+            ? `video/${media.ext}`
+            : "application/octet-stream"
+        )
     });
 
     return res.json({
@@ -481,15 +519,15 @@ app.post("/api/prepare", async (req, res) => {
       title,
       method: "saveapi"
     });
-
   } catch (error) {
     const message =
-      error?.name === "TimeoutError"
+      error?.name ===
+      "TimeoutError"
         ? "সাইটের উত্তর পেতে বেশি সময় লাগছে। আবার চেষ্টা করুন।"
         : (
-          error.message ||
-          "লিংক প্রসেস করা যায়নি।"
-        );
+            error.message ||
+            "লিংক প্রসেস করা যায়নি।"
+          );
 
     return res.status(400).json({
       error: message
@@ -497,225 +535,302 @@ app.post("/api/prepare", async (req, res) => {
   }
 });
 
-app.get("/api/file/:token", async (req, res) => {
-  const entry = prepared.get(req.params.token);
-
-  if (!entry || entry.expiresAt <= Date.now()) {
-    prepared.delete(req.params.token);
-
-    return res
-      .status(410)
-      .send(
-        "ডাউনলোড লিংকের মেয়াদ শেষ হয়েছে। আবার লিংক পেস্ট করুন।"
+app.get(
+  "/api/file/:token",
+  async (req, res) => {
+    const entry =
+      prepared.get(
+        req.params.token
       );
-  }
 
-  try {
-    const headers = {};
+    if (
+      !entry ||
+      entry.expiresAt <= Date.now()
+    ) {
+      prepared.delete(
+        req.params.token
+      );
 
-    if (req.headers.range) {
-      headers.Range = req.headers.range;
+      return res.status(410).json({
+        error:
+          "এই download link-এর মেয়াদ শেষ হয়েছে। আবার চেষ্টা করুন।"
+      });
     }
 
-    const {
-      response: upstream
-    } = await fetchWithSafeRedirects(
-      entry.url,
-      {
-        method: "GET",
-        headers
+    try {
+      const headers = {};
+
+      if (req.headers.range) {
+        headers.Range =
+          req.headers.range;
       }
-    );
 
-    const type =
-      upstream.headers.get("content-type") ||
-      entry.contentType ||
-      "application/octet-stream";
+      const {
+        response: upstream
+      } =
+        await fetchWithSafeRedirects(
+          entry.url,
+          {
+            method: "GET",
+            headers,
+            signal:
+              AbortSignal.timeout(
+                30_000
+              )
+          }
+        );
 
-    if (!upstream.ok && upstream.status !== 206) {
-      await upstream.body?.cancel().catch(() => {});
+      const type =
+        upstream.headers.get(
+          "content-type"
+        ) ||
+        entry.contentType ||
+        "application/octet-stream";
 
-      return res
-        .status(502)
-        .send(
+      if (
+        !upstream.ok &&
+        upstream.status !== 206
+      ) {
+        await upstream.body
+          ?.cancel()
+          .catch(() => {});
+
+        return res.status(502).send(
           "ভিডিও ফাইলটি সাইট থেকে পাওয়া যায়নি।"
         );
-    }
+      }
 
-    if (type.toLowerCase().includes("text/html")) {
-      await upstream.body?.cancel().catch(() => {});
+      if (
+        type
+          .toLowerCase()
+          .includes("text/html")
+      ) {
+        await upstream.body
+          ?.cancel()
+          .catch(() => {});
 
-      return res
-        .status(502)
-        .send(
+        return res.status(502).send(
           "সাইট ভিডিও ফাইলের বদলে একটি ওয়েব পেজ দিয়েছে।"
         );
-    }
+      }
 
-    const extMatch = type.match(
-      /video\/(mp4|webm|quicktime|x-matroska)/i
-    );
+      const extMatch =
+        type.match(
+          /video\/(mp4|webm|quicktime|x-matroska)/i
+        );
 
-    let ext = extMatch
-      ? ({
-          quicktime: "mov",
-          "x-matroska": "mkv"
-        }[
-          extMatch[1].toLowerCase()
-        ] || extMatch[1].toLowerCase())
-      : "";
+      let ext = extMatch
+        ? (
+            {
+              quicktime: "mov",
+              "x-matroska": "mkv"
+            }[
+              extMatch[1].toLowerCase()
+            ] ||
+            extMatch[1].toLowerCase()
+          )
+        : "";
 
-    if (!ext) {
-      try {
-        const m = new URL(entry.url)
-          .pathname
-          .match(VIDEO_EXT);
+      if (!ext) {
+        try {
+          const m =
+            new URL(
+              entry.url
+            ).pathname.match(
+              VIDEO_EXT
+            );
 
-        if (m) {
-          ext = m[1].toLowerCase();
+          if (m) {
+            ext =
+              m[1].toLowerCase();
+          }
+        } catch {}
+      }
+
+      if (!ext) {
+        ext = "mp4";
+      }
+
+      const fileName =
+        cleanFileName(
+          entry.title
+        ) +
+        "." +
+        ext;
+
+      res.status(
+        upstream.status === 206
+          ? 206
+          : 200
+      );
+
+      res.setHeader(
+        "Content-Type",
+        type
+      );
+
+      const asciiFallback =
+        fileName
+          .replace(
+            /[^\x20-\x7E]/g,
+            "_"
+          )
+          .replace(
+            /["\\]/g,
+            "_"
+          );
+
+      const encodedName =
+        encodeURIComponent(
+          fileName
+        ).replace(
+          /['()*]/g,
+          ch =>
+            `%${ch
+              .charCodeAt(0)
+              .toString(16)
+              .toUpperCase()}`
+        );
+
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`
+      );
+
+      res.setHeader(
+        "Cache-Control",
+        "no-store"
+      );
+
+      res.setHeader(
+        "X-Content-Type-Options",
+        "nosniff"
+      );
+
+      /*
+        Content-Length থাকলে frontend
+        প্রকৃত download progress হিসাব
+        করতে পারবে।
+      */
+      for (
+        const h of [
+          "content-length",
+          "content-range",
+          "accept-ranges"
+        ]
+      ) {
+        const value =
+          upstream.headers.get(h);
+
+        if (value) {
+          res.setHeader(
+            h,
+            value
+          );
         }
-      } catch {}
-    }
-
-    if (!ext) {
-      ext = "mp4";
-    }
-
-    const fileName =
-      cleanFileName(entry.title) +
-      "." +
-      ext;
-
-    res.status(
-      upstream.status === 206 ? 206 : 200
-    );
-
-    res.setHeader(
-      "Content-Type",
-      type
-    );
-
-    const asciiFallback = fileName
-      .replace(/[^\x20-\x7E]/g, "_")
-      .replace(/["\\]/g, "_");
-
-    const encodedName = encodeURIComponent(
-      fileName
-    ).replace(
-      /['()*]/g,
-      ch =>
-        `%${ch
-          .charCodeAt(0)
-          .toString(16)
-          .toUpperCase()}`
-    );
-
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`
-    );
-
-    res.setHeader(
-      "Cache-Control",
-      "no-store"
-    );
-
-    res.setHeader(
-      "X-Content-Type-Options",
-      "nosniff"
-    );
-
-    for (const h of [
-      "content-length",
-      "content-range",
-      "accept-ranges"
-    ]) {
-      const value =
-        upstream.headers.get(h);
-
-      if (value) {
-        res.setHeader(h, value);
       }
-    }
 
-    if (!upstream.body) {
-      return res.end();
-    }
-
-    const nodeStream =
-      Readable.fromWeb(upstream.body);
-
-    res.on("close", () => {
-      if (!res.writableEnded) {
-        nodeStream.destroy();
+      if (!upstream.body) {
+        return res.end();
       }
-    });
 
-    nodeStream.on("error", () => {
+      const nodeStream =
+        Readable.fromWeb(
+          upstream.body
+        );
+
+      res.on("close", () => {
+        if (!res.writableEnded) {
+          nodeStream.destroy();
+        }
+      });
+
+      nodeStream.on(
+        "error",
+        () => {
+          if (!res.headersSent) {
+            res.status(502);
+          }
+
+          res.end();
+        }
+      );
+
+      nodeStream.pipe(res);
+    } catch (error) {
       if (!res.headersSent) {
         res.status(502);
       }
 
-      res.end();
-    });
-
-    nodeStream.pipe(res);
-
-  } catch (error) {
-    if (!res.headersSent) {
-      res.status(502);
+      res.end(
+        error.message ||
+        "ভিডিও ডাউনলোড করা যায়নি।"
+      );
     }
-
-    res.end(
-      error.message ||
-      "ভিডিও ডাউনলোড করা যায়নি।"
-    );
   }
-});
+);
 
 /*
- * IMPORTANT:
- * Express 5-এ app.get("*") ব্যবহার করলে
- * "PathError: Missing parameter name" error হতে পারে।
- *
- * তাই এখানে Express 5 compatible catch-all route ব্যবহার করা হয়েছে।
- */
-app.get("/{*splat}", (req, res, next) => {
-  if (req.path.startsWith("/api/")) {
-    return next();
-  }
-
-  res.sendFile(INDEX_FILE, err => {
-    if (err && !res.headersSent) {
-      res
-        .status(404)
-        .send(
-          "index.html পাওয়া যায়নি। GitHub-এ index.html মূল ফোল্ডারে অথবা public/index.html-এ রাখুন।"
-        );
+  Express 5 compatible catch-all.
+  app.get("*") ব্যবহার করা যাবে না।
+*/
+app.get(
+  "/{*splat}",
+  (req, res, next) => {
+    if (
+      req.path.startsWith("/api/")
+    ) {
+      return next();
     }
-  });
-});
 
-app.use((err, _req, res, _next) => {
-  console.error(
-    "Unhandled error:",
-    err.message
-  );
-
-  res.status(500).json({
-    error:
-      "সার্ভারে সমস্যা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।"
-  });
-});
-
-app.listen(PORT, () => {
-  console.log(
-    `EM Fast 4K running on port ${PORT}`
-  );
-
-  if (!SAVEAPI_KEY) {
-    console.warn(
-      "SAVEAPI_KEY is not set. Direct video URLs can still work; social links need SaveAPI."
+    res.sendFile(
+      INDEX_FILE,
+      err => {
+        if (
+          err &&
+          !res.headersSent
+        ) {
+          res
+            .status(404)
+            .send(
+              "index.html পাওয়া যায়নি। GitHub-এ index.html মূল ফোল্ডারে অথবা public/index.html-এ রাখুন।"
+            );
+        }
+      }
     );
   }
-});
+);
+
+app.use(
+  (
+    err,
+    _req,
+    res,
+    _next
+  ) => {
+    console.error(
+      "Unhandled error:",
+      err.message
+    );
+
+    res.status(500).json({
+      error:
+        "সার্ভারে সমস্যা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।"
+    });
+  }
+);
+
+app.listen(
+  PORT,
+  () => {
+    console.log(
+      `EM Fast 4K running on port ${PORT}`
+    );
+
+    if (!SAVEAPI_KEY) {
+      console.warn(
+        "SAVEAPI_KEY is not set. Direct video URLs can still work; social links need SaveAPI."
+      );
+    }
+  }
+);
