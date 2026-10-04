@@ -1,18 +1,18 @@
 {
-  "name": "em-fast-4k-downloader",
+  "name": "em-fast-4k",
   "version": "1.0.0",
   "private": true,
-  "description": "EM Fast 4K video link resolver and SaveAPI downloader for Render",
+  "description": "EM Fast 4K video downloader for Render",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "dependencies": {
-    "express": "^4.21.2",
-    "express-rate-limit": "^7.5.0",
-    "helmet": "^8.0.0"
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0"
   }
 }
