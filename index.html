@@ -437,32 +437,13 @@ async function downloadActual(){
       - YouTube uses /api/download because SaveAPI's YouTube signed stream is
         tied to the server-side request and must be streamed through Render.
     */
-    const a=document.createElement("a");
-    a.href=d.directUrl;
-    a.rel="noopener";
-    a.target="_self";
-    a.style.display="none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    progress(100);
-    title.textContent="DOWNLOAD STARTED";
+    // Use a real same-origin navigation for Android/Chrome download handling.
+    // This is more reliable than a hidden anchor click for large files.
+    title.textContent="DOWNLOAD STARTING…";
+    progress(90);
     errorBox.textContent="";
 
-    setTimeout(()=>{
-      input.value="";
-      busy=false;
-      btn.disabled=false;
-      btn.textContent="DOWNLOAD";
-      progress(0);
-      videos.classList.remove("active-smoke");
-      title.textContent="EM Fast 4K";
-      title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
-      title.style.webkitBackgroundClip="text";
-      title.style.webkitTextFillColor="transparent";
-      title.style.filter="none";
-    },5000);
+    window.location.href=d.directUrl;
 
   }catch(e){
     errorBox.textContent="⚠️ "+(e.message||"Unable to process the video link");
