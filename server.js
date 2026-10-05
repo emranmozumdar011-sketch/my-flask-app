@@ -537,6 +537,45 @@ app.post("/api/prepare", async (req, res) => {
 // SECURE VIDEO STREAM / DOWNLOAD
 // ----------------------------------------------------
 
+function isLikelyVideoChunk(chunk) {
+  if (!chunk || chunk.length === 0) return false;
+
+  const sample = Buffer.from(chunk.slice(0, Math.min(chunk.length, 64)));
+  const ascii = sample.toString("latin1").trimStart().toLowerCase();
+
+  // Never let an API error page/JSON response become an .mp4 file.
+  if (
+    ascii.startsWith("<!doctype") ||
+    ascii.startsWith("<html") ||
+    ascii.startsWith("<?xml") ||
+    ascii.startsWith("{") ||
+    ascii.startsWith("[") ||
+    ascii.startsWith("error")
+  ) {
+    return false;
+  }
+
+  // Common video/container signatures.
+  if (sample.length >= 12 && sample.toString("ascii", 4, 8) === "ftyp") return true; // MP4/MOV
+  if (sample.length >= 4 && sample[0] === 0x1a && sample[1] === 0x45 && sample[2] === 0xdf && sample[3] === 0xa3) return true; // WebM/Matroska
+  if (sample.length >= 4 && sample.toString("ascii", 0, 4) === "RIFF") return true; // AVI/WebP family
+  if (sample.length >= 4 && sample.toString("ascii", 0, 4) === "OggS") return true; // OGG/OGV
+  if (sample.length >= 3 && sample[0] === 0x49 && sample[1] === 0x44 && sample[2] === 0x33) return true; // ID3 audio/video containers
+  if (sample.length >= 1 && sample[0] === 0x47) return true; // MPEG-TS packet
+
+  return false;
+}
+
+function extensionForContentType(contentType) {
+  const type = String(contentType || "").split(";")[0].trim().toLowerCase();
+  if (type === "video/webm") return ".webm";
+  if (type === "video/quicktime") return ".mov";
+  if (type === "video/x-matroska") return ".mkv";
+  if (type === "video/ogg") return ".ogv";
+  if (type === "video/mp4") return ".mp4";
+  return ".mp4";
+}
+
 async function streamUpstreamToResponse(response, res, fileName, fallbackName, knownSize = null) {
   if (!response.ok || !response.body) {
     await response.body?.cancel().catch(() => {});
@@ -551,20 +590,16 @@ async function streamUpstreamToResponse(response, res, fileName, fallbackName, k
     return { ok: false, status: 413, error: "Maximum file size is 5 GB." };
   }
 
-  const contentType = (response.headers.get("content-type") || "video/mp4").toLowerCase();
-  if (contentType.startsWith("text/html") || contentType.startsWith("application/json")) {
-    await response.body.cancel().catch(() => {});
-    return { ok: false, status: 502, error: "The video server returned an invalid media response. Please try again." };
-  }
+  const rawType = response.headers.get("content-type") || "";
+  const contentType = rawType.toLowerCase();
 
-  // Do NOT reject Content-Length: 0 or a missing Content-Length here. SaveAPI's
-  // YouTube stream intentionally has no Content-Length and is read one pass.
-  // Instead, read the first real chunk and only then send download headers.
+  // Read the first real bytes BEFORE sending any download headers.
+  // This prevents HTML/JSON error pages from being saved as .mp4 files.
   const reader = response.body.getReader();
   let first;
   try {
     first = await reader.read();
-  } catch (error) {
+  } catch {
     try { await reader.cancel(); } catch {}
     return { ok: false, status: 502, error: "The video stream could not be started. Please try again." };
   }
@@ -574,14 +609,46 @@ async function streamUpstreamToResponse(response, res, fileName, fallbackName, k
     return { ok: false, status: 502, error: "The video server returned an empty file. Please try again." };
   }
 
+  const looksTextLike =
+    contentType.startsWith("text/html") ||
+    contentType.startsWith("application/json") ||
+    contentType.startsWith("text/plain");
+
+  if (looksTextLike) {
+    try { await reader.cancel(); } catch {}
+    return { ok: false, status: 502, error: "The video server returned an invalid media response. Please try again." };
+  }
+
+  const isVideoType =
+    contentType.startsWith("video/") ||
+    contentType === "application/octet-stream" ||
+    contentType === "" ||
+    contentType.includes("mp4") ||
+    contentType.includes("quicktime") ||
+    contentType.includes("matroska");
+
+  if (!isVideoType || (contentType === "application/octet-stream" && !isLikelyVideoChunk(first.value))) {
+    try { await reader.cancel(); } catch {}
+    return { ok: false, status: 502, error: "The returned file is not a valid video. Please try again." };
+  }
+
   const safeName = cleanFileName(fileName || fallbackName) || "EM-Fast-4K-Video";
-  const finalName = /\.(mp4|m4v|mov|webm|mkv)$/i.test(safeName) ? safeName : `${safeName}.mp4`;
+  const extension = extensionForContentType(contentType);
+
+  let finalName = safeName;
+  if (!/\.(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|3gp|ogv)$/i.test(finalName)) {
+    finalName += extension;
+  }
 
   res.status(200);
-  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Type", contentType || "video/mp4");
   res.setHeader("Content-Disposition", `attachment; filename="${finalName.replace(/"/g, "")}"`);
-  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
   res.setHeader("X-Content-Type-Options", "nosniff");
+
+  // YouTube's create endpoint intentionally has no Content-Length.
+  // Only send Content-Length when the upstream/API gave us a trustworthy value.
   if (Number.isFinite(effectiveSize) && effectiveSize > 0) {
     res.setHeader("Content-Length", String(effectiveSize));
   }
@@ -611,10 +678,17 @@ async function streamUpstreamToResponse(response, res, fileName, fallbackName, k
       if (!res.write(next.value)) await new Promise(resolve => res.once("drain", resolve));
     }
 
+    // If the API supplied a size, verify that we actually received the whole file.
+    // Never silently turn a truncated stream into a playable-looking 0:00 file.
+    if (Number.isFinite(effectiveSize) && effectiveSize > 0 && totalBytes !== effectiveSize) {
+      if (!res.destroyed) res.destroy();
+      return { ok: false, status: 502, error: "The video download was incomplete. Please try again." };
+    }
+
     res.end();
     return { ok: true, bytes: totalBytes };
-  } catch (streamError) {
-    if (!res.destroyed) res.destroy(streamError);
+  } catch {
+    if (!res.destroyed) res.destroy();
     return { ok: false, status: 502, error: "The video download stream was interrupted. Please try again." };
   }
 }
