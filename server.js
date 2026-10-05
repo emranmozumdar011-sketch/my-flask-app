@@ -206,8 +206,8 @@ function tooLarge(size) {
 
 function cleanFileName(value) {
   const cleaned = String(value || "EM-Fast-4K-Video")
-    .replace(/[<>:"/\\\\|?*\\u0000-\\u001F]/g, "_")
-    .replace(/\\s+/g, " ")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
+    .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
 
@@ -594,7 +594,7 @@ app.post("/api/prepare", async (req, res) => {
       item &&
       item.type !== "audio" &&
       typeof item.url === "string" &&
-      /^https?:\\/\\//i.test(item.url) &&
+      /^https?:\/\//i.test(item.url) &&
       (
         item.type === "video" ||
         VIDEO_EXT.test(item.url) ||
