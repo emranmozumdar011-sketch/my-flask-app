@@ -485,115 +485,58 @@ app.get("/api/health", (_req, res) => {
 // ----------------------------------------------------
 
 app.post("/api/prepare", async (req, res) => {
-  const inputUrl =
-    String(
-      req.body?.url || ""
-    ).trim();
+  const inputUrl = String(req.body?.url || "").trim();
 
-  if (
-    !inputUrl ||
-    inputUrl.length > 3000
-  ) {
+  if (!inputUrl || inputUrl.length > 3000) {
     return res.status(400).json({
-      error:
-        "একটি সঠিক ভিডিও লিংক পেস্ট করুন।"
+      error: "একটি সঠিক ভিডিও লিংক পেস্ট করুন।"
     });
   }
 
   try {
-    await assertPublicHttpUrl(
-      inputUrl
-    );
+    await assertPublicHttpUrl(inputUrl);
 
-    // 1) Try direct video first.
-    // No SaveAPI call if the link is already a video.
-    const direct =
-      await probeDirectVideo(
-        inputUrl
-      );
+    // STEP 1: If the user already supplied a real media URL,
+    // download it ourselves. SaveAPI is NOT called in this case.
+    const direct = await probeDirectVideo(inputUrl);
 
     if (direct.direct) {
       if (tooLarge(direct.size)) {
-        return res.status(413).json({
-          error:
-            "Maximum file size is 5 GB."
-        });
+        return res.status(413).json({ error: "Maximum file size is 5 GB." });
       }
 
-      // Some video hosts hide Content-Length during the first probe.
-      // Verify the final direct URL once more before returning it.
-      if (direct.size == null) {
-        try {
-          const verified =
-            await fetchWithSafeRedirects(
-              direct.url,
-              { method: "HEAD" }
-            );
-
-          const verifiedSize =
-            parseTotalSize(verified.response);
-
-          await verified.response.body
-            ?.cancel()
-            .catch(() => {});
-
-          if (tooLarge(verifiedSize)) {
-            return res.status(413).json({
-              error:
-                "Maximum file size is 5 GB."
-            });
-          }
-
-          if (Number.isFinite(verifiedSize)) {
-            direct.size = verifiedSize;
-          }
-        } catch {}
-      }
-
-      const title =
-        cleanFileName(
-          titleFromUrl(
-            direct.url
-          )
-        );
-
+      const title = cleanFileName(titleFromUrl(direct.url));
       return res.json({
         ok: true,
-        directUrl:
-          `/api/download?url=${encodeURIComponent(direct.url)}&name=${encodeURIComponent(title)}`,
+        directUrl: `/api/download?url=${encodeURIComponent(direct.url)}&name=${encodeURIComponent(title)}`,
         title,
         method: "direct",
         size: direct.size
       });
     }
 
-    // 2) SaveAPI resolves public supported platforms automatically.
-    // YouTube is the documented two-step exception: info -> create.
+    // STEP 2: Only now use SaveAPI as a resolver/fallback.
     if (!SAVEAPI_KEY) {
       return res.status(503).json({
-        error:
-          "এই লিংকটি সরাসরি ভিডিও ফাইল নয়। Render → Environment Variables-এ SAVEAPI_KEY দিন।"
+        error: "এই লিংকটি সরাসরি ভিডিও নয়। Render → Environment Variables-এ SAVEAPI_KEY দিন।"
       });
     }
 
-    const inputHost = new URL(inputUrl).hostname.toLowerCase();
-    const isYouTube =
-      inputHost === "youtube.com" ||
-      inputHost === "www.youtube.com" ||
-      inputHost === "m.youtube.com" ||
-      inputHost === "music.youtube.com" ||
-      inputHost === "youtu.be" ||
-      inputHost === "www.youtu.be";
+    const host = new URL(inputUrl).hostname.toLowerCase();
+    const isYouTube = /(^|\\.)((youtube\\.com)|(youtu\\.be))$/.test(host);
 
-    const saveApiGet = async (endpoint, params = {}) => {
-      const url = new URL(`https://api.saveapi.org/v1/${endpoint}`);
-      for (const [key, value] of Object.entries(params)) {
-        if (value != null && value !== "") {
-          url.searchParams.set(key, String(value));
-        }
-      }
+    let data = null;
+    let media = null;
 
-      const response = await fetch(url, {
+    // YouTube is the special SaveAPI case: its server-bound signed stream
+    // is created by /v1/youtube/create. This intentionally avoids storing
+    // or proxying the original YouTube page as if it were an MP4.
+    if (isYouTube) {
+      const quality = String(process.env.YOUTUBE_QUALITY || "1080p");
+      const ytApiUrl =
+        `https://api.saveapi.org/v1/youtube/create?url=${encodeURIComponent(inputUrl)}&quality=${encodeURIComponent(quality)}`;
+
+      const ytResponse = await fetch(ytApiUrl, {
         method: "GET",
         headers: {
           "Authorization": `Bearer ${SAVEAPI_KEY}`,
@@ -602,364 +545,220 @@ app.post("/api/prepare", async (req, res) => {
         signal: AbortSignal.timeout(60000)
       });
 
-      let json = null;
-      try {
-        json = await response.json();
-      } catch {}
+      try { data = await ytResponse.json(); } catch { data = null; }
 
-      return { response, json };
-    };
-
-    let data;
-    let media = null;
-    let size = null;
-    let title = cleanFileName(titleFromUrl(inputUrl));
-
-    if (isYouTube) {
-      // SaveAPI's YouTube endpoint returns renditions without URLs from /info.
-      // Build one fresh signed MP4 URL with /create, then stream it through us.
-      const infoResult = await saveApiGet("youtube/info", {
-        url: inputUrl
-      });
-
-      const info = infoResult.json;
-
-      if (!infoResult.response.ok || info?.success === false) {
-        const code = info?.error?.code || "";
-        const message =
-          code === "PRIVATE_CONTENT"
-            ? "এই YouTube ভিডিওটি private/restricted।"
-            : code === "MEDIA_NOT_FOUND"
-              ? "YouTube ভিডিওটি পাওয়া যায়নি বা মুছে গেছে।"
-              : info?.error?.message ||
-                `YouTube তথ্য নেওয়া যায়নি (HTTP ${infoResult.response.status}).`;
-        return res.status(
-          infoResult.response.status === 429 ? 429 : 502
-        ).json({ error: message });
-      }
-
-      title = cleanFileName(
-        info?.title ||
-        info?.meta?.title ||
-        titleFromUrl(inputUrl)
-      );
-
-      const formats = Array.isArray(info?.formats)
-        ? info.formats.filter(
-            item =>
-              item &&
-              item.type === "video" &&
-              typeof item.quality === "string"
-          )
-        : [];
-
-      if (!formats.length) {
-        return res.status(422).json({
-          error: "এই YouTube ভিডিওর কোনো downloadable video quality পাওয়া যায়নি।"
-        });
-      }
-
-      // Prefer the highest available MP4 quality. SaveAPI currently documents
-      // YouTube renditions from 144p through 1080p.
-      const qualityRank = value => {
-        const match = String(value).match(/(\d+)p/i);
-        return match ? Number(match[1]) : 0;
-      };
-
-      formats.sort((a, b) => qualityRank(b.quality) - qualityRank(a.quality));
-      const selected = formats[0];
-      const quality = selected.quality;
-
-      const madeResult = await saveApiGet("youtube/create", {
-        url: inputUrl,
-        quality
-      });
-      const made = madeResult.json;
-
-      if (!madeResult.response.ok || made?.success === false) {
-        const code = made?.error?.code || "";
-        const message =
-          code === "LINK_EXPIRED"
-            ? "YouTube download link expired. Please try again."
-            : code === "INVALID_FORMAT"
-              ? "এই ভিডিওতে নির্বাচিত quality নেই। আবার চেষ্টা করুন।"
-              : made?.error?.message ||
-                `YouTube download link তৈরি করা যায়নি (HTTP ${madeResult.response.status}).`;
-        return res.status(
-          madeResult.response.status === 429 ? 429 : 502
-        ).json({ error: message });
-      }
-
-      media = made?.url;
-      size = Number(made?.file_size);
-      if (!Number.isFinite(size)) size = null;
-
-      if (
-        typeof media !== "string" ||
-        !/^https?:\/\//i.test(media)
-      ) {
-        return res.status(422).json({
-          error: "YouTube download link পাওয়া যায়নি।"
-        });
-      }
-    } else {
-      const apiResult = await saveApiGet("download", {
-        url: inputUrl
-      });
-
-      data = apiResult.json;
-
-      if (!apiResult.response.ok || data?.success === false) {
+      if (!ytResponse.ok || data?.success === false || typeof data?.url !== "string") {
         const code = data?.error?.code || "";
         const statusMessage =
-          apiResult.response.status === 429
+          ytResponse.status === 429
             ? "SaveAPI rate limit reached. কিছুক্ষণ পরে আবার চেষ্টা করুন।"
-            : apiResult.response.status === 401
-              ? "SaveAPI key সঠিক নয়। Render → Environment Variables চেক করুন।"
-              : code === "UNSUPPORTED_PLATFORM"
-                ? "এই সাইটটি SaveAPI বর্তমানে সমর্থন করে না।"
+            : ytResponse.status === 401
+              ? "SaveAPI key সঠিক নয়। Render → Environment Variables দেখুন।"
+              : code === "INVALID_FORMAT"
+                ? `YouTube-এ ${quality} পাওয়া যায়নি। Render-এ YOUTUBE_QUALITY বদলান।`
                 : code === "PRIVATE_CONTENT"
-                  ? "এই পোস্টটি private/restricted।"
-                  : code === "MEDIA_NOT_FOUND"
-                    ? "এই পোস্টে downloadable media পাওয়া যায়নি।"
-                    : data?.error?.message ||
-                      `SaveAPI request failed (HTTP ${apiResult.response.status}).`;
+                  ? "এই YouTube ভিডিওটি private বা restricted।"
+                  : code === "LINK_EXPIRED"
+                    ? "YouTube download link-এর মেয়াদ শেষ হয়েছে। আবার চেষ্টা করুন।"
+                    : (data?.error?.message || `SaveAPI YouTube request failed (HTTP ${ytResponse.status}).`);
 
-        return res.status(
-          apiResult.response.status === 429 ? 429 : 502
-        ).json({ error: statusMessage });
+        return res.status(ytResponse.status === 429 ? 429 : 502).json({ error: statusMessage });
       }
 
-      title = cleanFileName(
-        data?.meta?.title ||
-        data?.title ||
-        titleFromUrl(inputUrl)
-      );
+      media = {
+        url: data.url,
+        type: "video",
+        size: Number.isFinite(Number(data.file_size)) ? Number(data.file_size) : null,
+        filename: data.filename || data.title || "EM-Fast-4K-Video"
+      };
+    } else {
+      // One generic SaveAPI resolve call for supported social platforms.
+      // SaveAPI's medias[] entries are direct source-CDN URLs; the actual
+      // video bytes are fetched by our download endpoint, not by another
+      // SaveAPI download call.
+      const apiUrl =
+        `https://api.saveapi.org/v1/download?url=${encodeURIComponent(inputUrl)}`;
 
-      // Prefer the documented recommended video format when present.
-      const allFormats = Array.isArray(data?.formats)
-        ? data.formats.filter(
-            item =>
-              item &&
-              item.type === "video" &&
-              typeof item.url === "string" &&
-              /^https?:\/\//i.test(item.url)
-          )
-        : [];
-
-      const recommended =
-        typeof data?.recommended_format === "string"
-          ? allFormats.find(
-              item => item.format === data.recommended_format
-            )
-          : null;
-
-      const videoMedias = Array.isArray(data?.medias)
-        ? data.medias.filter(
-            item =>
-              item &&
-              item.type === "video" &&
-              typeof item.url === "string" &&
-              /^https?:\/\//i.test(item.url)
-          )
-        : [];
-
-      media =
-        recommended?.url ||
-        allFormats[0]?.url ||
-        videoMedias[0]?.url ||
-        null;
-
-      const chosen =
-        recommended ||
-        allFormats[0] ||
-        videoMedias[0] ||
-        null;
-
-      size = Number(
-        chosen?.size ||
-        chosen?.size_mb * 1024 * 1024 ||
-        chosen?.filesize ||
-        chosen?.file_size ||
-        chosen?.content_length
-      );
-      if (!Number.isFinite(size)) size = null;
-    }
-
-    if (
-      typeof media !== "string" ||
-      !/^https?:\/\//i.test(media)
-    ) {
-      return res.status(422).json({
-        error:
-          "এই লিংকের কোনো downloadable video file পাওয়া যায়নি।"
+      const apiResponse = await fetch(apiUrl, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${SAVEAPI_KEY}`,
+          "Accept": "application/json"
+        },
+        signal: AbortSignal.timeout(30000)
       });
+
+      try { data = await apiResponse.json(); } catch { data = null; }
+
+      if (!apiResponse.ok || data?.success === false) {
+        const code = data?.error?.code || "";
+        const statusMessage =
+          apiResponse.status === 429
+            ? "SaveAPI rate limit reached. কিছুক্ষণ পরে আবার চেষ্টা করুন।"
+            : apiResponse.status === 401
+              ? "SaveAPI key সঠিক নয়। Render → Environment Variables দেখুন।"
+              : code === "UNSUPPORTED_PLATFORM"
+                ? "এই সাইটটি SaveAPI সমর্থন করে না।"
+                : code === "PRIVATE_CONTENT"
+                  ? "এই ভিডিওটি private বা restricted।"
+                  : code === "MEDIA_NOT_FOUND"
+                    ? "ভিডিওটি পাওয়া যায়নি বা এতে downloadable media নেই।"
+                    : (data?.error?.message || `SaveAPI request failed (HTTP ${apiResponse.status}).`);
+
+        return res.status(apiResponse.status === 429 ? 429 : 502).json({ error: statusMessage });
+      }
+
+      const candidates = [];
+      if (Array.isArray(data?.formats)) candidates.push(...data.formats);
+      if (Array.isArray(data?.medias)) candidates.push(...data.medias);
+
+      const videos = candidates.filter(item =>
+        item &&
+        item.type !== "audio" &&
+        typeof item.url === "string" &&
+        /^https?:\/\//i.test(item.url)
+      );
+
+      if (!videos.length) {
+        return res.status(422).json({
+          error: "SaveAPI কোনো সরাসরি ভিডিও ফাইলের লিংক দিতে পারেনি।"
+        });
+      }
+
+      // Prefer SaveAPI's recommended rendition when supplied.
+      const recommended = data?.recommended_format;
+      media =
+        videos.find(v => v.format === recommended) ||
+        videos[0];
     }
 
-    await assertPublicHttpUrl(media);
+    await assertPublicHttpUrl(media.url);
+
+    let size = Number(media.size ?? (Number.isFinite(Number(media.size_mb)) ? Number(media.size_mb) * 1024 * 1024 : (media.filesize ?? media.file_size ?? media.content_length)));
+    if (!Number.isFinite(size) || size <= 0) size = null;
 
     if (tooLarge(size)) {
-      return res.status(413).json({
-        error: "Maximum file size is 5 GB."
+      return res.status(413).json({ error: "Maximum file size is 5 GB." });
+    }
+
+    // Do a tiny range request against the resolved media URL. This is NOT a
+    // SaveAPI request and downloads only a tiny piece, but catches empty,
+    // expired or non-video URLs before the user's phone gets a 0-byte file.
+    const verified = await probeDirectVideo(media.url);
+    if (!verified.direct) {
+      return res.status(502).json({
+        error: "ভিডিওর আসল media link পাওয়া গেছে, কিন্তু সেটি এখন ডাউনলোডযোগ্য নয়। আবার চেষ্টা করুন।"
       });
     }
+
+    if (verified.size != null) size = verified.size;
+
+    const title = cleanFileName(
+      media.filename || data?.meta?.title || data?.title || titleFromUrl(inputUrl)
+    );
 
     return res.json({
       ok: true,
-      directUrl:
-        `/api/download?url=${encodeURIComponent(media)}&name=${encodeURIComponent(title)}`,
+      directUrl: `/api/download?url=${encodeURIComponent(verified.url)}&name=${encodeURIComponent(title)}`,
       title,
       method: isYouTube ? "saveapi-youtube" : "saveapi",
       size
     });
-
   } catch (error) {
-    const message =
-      error?.name ===
-      "TimeoutError"
-        ? "The site took too long to respond. Please try again."
-        : (
-          error.message ||
-          "The link could not be processed."
-        );
+    const message = error?.name === "TimeoutError"
+      ? "সাইটটি উত্তর দিতে বেশি সময় নিয়েছে। আবার চেষ্টা করুন।"
+      : (error.message || "লিংকটি প্রসেস করা যায়নি।");
 
-    return res.status(400).json({
-      error: message
-    });
+    return res.status(400).json({ error: message });
   }
 });
 
 // ----------------------------------------------------
 // SECURE VIDEO STREAM / DOWNLOAD
 // ----------------------------------------------------
-// The browser receives a same-origin download URL. Render streams the
-// remote video instead of loading the whole file into memory.
+// The browser gets a same-origin URL. Render streams the remote media
+// without loading the complete video into RAM and without sending the
+// actual social-platform bytes through SaveAPI for direct-CDN platforms.
 app.get("/api/download", async (req, res) => {
-  const inputUrl =
-    String(req.query?.url || "").trim();
+  const inputUrl = String(req.query?.url || "").trim();
 
   if (!inputUrl || inputUrl.length > 12000) {
-    return res.status(400).json({
-      error: "ডাউনলোড লিংকটি সঠিক নয়।"
-    });
+    return res.status(400).json({ error: "ডাউনলোড লিংকটি সঠিক নয়।" });
   }
 
   try {
     await assertPublicHttpUrl(inputUrl);
 
-    const { response, finalUrl } =
-      await fetchWithSafeRedirects(
-        inputUrl,
-        {
-          method: "GET",
-          headers: {
-            "accept": "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
-            "accept-encoding": "identity"
-          },
-          signal: AbortSignal.timeout(30 * 60 * 1000)
-        }
-      );
+    const { response, finalUrl } = await fetchWithSafeRedirects(
+      inputUrl,
+      {
+        method: "GET",
+        headers: {
+          "accept": "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
+          "accept-encoding": "identity"
+        },
+        // Large files can legitimately take many minutes. The stream itself
+        // is not given a short 30-second total timeout.
+      }
+    );
 
     if (!response.ok || !response.body) {
       await response.body?.cancel().catch(() => {});
       return res.status(502).json({
-        error:
-          `ভিডিও সার্ভার ডাউনলোড দিতে পারেনি (HTTP ${response.status}).`
+        error: `ভিডিও সার্ভার ডাউনলোড দিতে পারেনি (HTTP ${response.status}).`
       });
     }
 
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
     const contentLength = parseTotalSize(response);
 
     if (tooLarge(contentLength)) {
       await response.body.cancel().catch(() => {});
-      return res.status(413).json({
-        error: "Maximum file size is 5 GB."
-      });
+      return res.status(413).json({ error: "Maximum file size is 5 GB." });
     }
 
-    const requestedName =
-      cleanFileName(
-        String(req.query?.name || "").trim()
-      );
-
-    const fallbackName =
-      titleFromUrl(finalUrl);
-
-    const fileName =
-      cleanFileName(
-        requestedName || fallbackName
-      ) || "EM-Fast-4K-Video";
-
-    const contentType =
-      response.headers.get("content-type") ||
-      "application/octet-stream";
+    const requestedName = cleanFileName(String(req.query?.name || "").trim());
+    const fallbackName = titleFromUrl(finalUrl);
+    const fileName = cleanFileName(requestedName || fallbackName) || "EM-Fast-4K-Video";
 
     res.status(200);
-    res.setHeader(
-      "Content-Type",
-      contentType
-    );
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${fileName.replace(/"/g, "")}.mp4"`
-    );
-    res.setHeader(
-      "Cache-Control",
-      "no-store"
-    );
-    res.setHeader(
-      "X-Content-Type-Options",
-      "nosniff"
-    );
+    res.setHeader("Content-Type", contentType || "video/mp4");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName.replace(/"/g, "")}.mp4"`);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Accept-Ranges", "none");
 
     if (Number.isFinite(contentLength)) {
-      res.setHeader(
-        "Content-Length",
-        String(contentLength)
-      );
+      res.setHeader("Content-Length", String(contentLength));
     }
 
     let totalBytes = 0;
-
-    try {
-      for await (const chunk of response.body) {
-        totalBytes +=
-          chunk.byteLength;
-
-        if (totalBytes > MAX_FILE_BYTES) {
-          res.destroy();
-          return;
-        }
-
-        if (!res.write(chunk)) {
-          await new Promise(resolve =>
-            res.once("drain", resolve)
-          );
-        }
+    for await (const chunk of response.body) {
+      totalBytes += chunk.byteLength;
+      if (totalBytes > MAX_FILE_BYTES) {
+        res.destroy();
+        return;
       }
-
-      res.end();
-    } catch (streamError) {
-      if (!res.destroyed) {
-        res.destroy(streamError);
+      if (!res.write(chunk)) {
+        await new Promise(resolve => res.once("drain", resolve));
       }
     }
+
+    // Never report a successful empty download.
+    if (totalBytes === 0 && !res.destroyed) {
+      res.destroy(new Error("Empty video stream"));
+      return;
+    }
+
+    if (!res.destroyed) res.end();
   } catch (error) {
-    if (res.headersSent) {
-      return res.destroy(error);
-    }
+    if (res.headersSent) return res.destroy(error);
 
-    const message =
-      error?.name === "TimeoutError"
-        ? "ভিডিও সার্ভার উত্তর দিতে বেশি সময় নিয়েছে। আবার চেষ্টা করুন।"
-        : (
-          error.message ||
-          "ভিডিও ডাউনলোড করা যায়নি।"
-        );
+    const message = error?.name === "TimeoutError"
+      ? "ভিডিও সার্ভার উত্তর দিতে বেশি সময় নিয়েছে। আবার চেষ্টা করুন।"
+      : (error.message || "ভিডিও ডাউনলোড করা যায়নি।");
 
-    return res.status(502).json({
-      error: message
-    });
+    return res.status(502).json({ error: message });
   }
 });
 
