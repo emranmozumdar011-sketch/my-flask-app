@@ -1,7 +1,7 @@
 // EM Fast 4K — Render Web Service
-// Server-side streaming downloader.
-// API keys belong in Render Environment Variables.
-// SaveAPI is used only when the submitted URL is not already a direct video file.
+// API keys belong in Render Environment Variables, never in public HTML.
+// Direct video first. SaveAPI is used only when direct detection fails.
+// YouTube uses SaveAPI's special /youtube/info + /youtube/create flow.
 
 const express = require("express");
 const helmet = require("helmet");
@@ -22,22 +22,24 @@ const SAVEAPI_BASE = "https://api.saveapi.org/v1";
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-      upgradeInsecureRequests: null
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: null
+      }
     }
-  }
-}));
+  })
+);
 
 app.use(express.json({ limit: "8kb" }));
 
@@ -46,27 +48,31 @@ const ROOT_INDEX = path.join(__dirname, "index.html");
 const PUBLIC_INDEX = path.join(PUBLIC_DIR, "index.html");
 const INDEX_FILE = fs.existsSync(PUBLIC_INDEX) ? PUBLIC_INDEX : ROOT_INDEX;
 
-app.use(express.static(
-  fs.existsSync(PUBLIC_DIR) ? PUBLIC_DIR : __dirname,
-  { extensions: ["html"] }
-));
+app.use(express.static(fs.existsSync(PUBLIC_DIR) ? PUBLIC_DIR : __dirname, { extensions: ["html"] }));
 
-app.use("/api/prepare", rateLimit({
+const prepareLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 120,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { error: "Too many requests. Please try again later." }
-}));
+});
 
-// ---------------- SECURITY ----------------
+app.use("/api/prepare", prepareLimiter);
+
+// ----------------------------------------------------
+// SECURITY HELPERS
+// ----------------------------------------------------
 
 function isPrivateIPv4(ip) {
-  const p = ip.split(".").map(Number);
-  if (p.length !== 4 || p.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return true;
-  const [a, b] = p;
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = parts;
   return (
-    a === 0 || a === 10 || a === 127 || a >= 224 ||
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
@@ -79,21 +85,27 @@ function isPrivateIPv4(ip) {
 }
 
 function isPrivateIPv6(ip) {
-  const v = ip.toLowerCase().split("%")[0];
+  const value = ip.toLowerCase().split("%")[0];
   return (
-    v === "::" || v === "::1" ||
-    v.startsWith("fc") || v.startsWith("fd") ||
-    v.startsWith("fe80:") || v.startsWith("ff") ||
-    v.startsWith("::ffff:127.") ||
-    v.startsWith("::ffff:10.") ||
-    v.startsWith("::ffff:192.168.")
+    value === "::" ||
+    value === "::1" ||
+    value.startsWith("fc") ||
+    value.startsWith("fd") ||
+    value.startsWith("fe80:") ||
+    value.startsWith("ff") ||
+    value.startsWith("::ffff:127.") ||
+    value.startsWith("::ffff:10.") ||
+    value.startsWith("::ffff:192.168.")
   );
 }
 
 async function assertPublicHttpUrl(input) {
   let u;
-  try { u = new URL(input); }
-  catch { throw new Error("Please provide a valid video link."); }
+  try {
+    u = new URL(input);
+  } catch {
+    throw new Error("Please provide a valid video link.");
+  }
 
   if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) {
     throw new Error("Only normal HTTP/HTTPS links are supported.");
@@ -106,14 +118,8 @@ async function assertPublicHttpUrl(input) {
   }
 
   const ipType = net.isIP(host);
-
-  if (ipType === 4 && isPrivateIPv4(host)) {
-    throw new Error("This address cannot be used.");
-  }
-
-  if (ipType === 6 && isPrivateIPv6(host)) {
-    throw new Error("This address cannot be used.");
-  }
+  if (ipType === 4 && isPrivateIPv4(host)) throw new Error("This address cannot be used.");
+  if (ipType === 6 && isPrivateIPv6(host)) throw new Error("This address cannot be used.");
 
   if (!ipType) {
     let records;
@@ -122,10 +128,7 @@ async function assertPublicHttpUrl(input) {
     } catch {
       throw new Error("The site address could not be found.");
     }
-
-    if (!records.length || records.some(r =>
-      r.family === 4 ? isPrivateIPv4(r.address) : isPrivateIPv6(r.address)
-    )) {
+    if (!records.length || records.some(r => r.family === 4 ? isPrivateIPv4(r.address) : isPrivateIPv6(r.address))) {
       throw new Error("This site address is not safe to use.");
     }
   }
@@ -142,9 +145,9 @@ async function fetchWithSafeRedirects(inputUrl, options = {}, maxRedirects = MAX
     const response = await fetch(current, {
       ...options,
       redirect: "manual",
-      signal: options.signal || AbortSignal.timeout(30000),
+      signal: options.signal || AbortSignal.timeout(20000),
       headers: {
-        "user-agent": "EMFast4K/2.0",
+        "user-agent": "EMFast4K/1.2",
         ...(options.headers || {})
       }
     });
@@ -152,11 +155,7 @@ async function fetchWithSafeRedirects(inputUrl, options = {}, maxRedirects = MAX
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       await response.body?.cancel().catch(() => {});
-
-      if (!location || i === maxRedirects) {
-        throw new Error("The site redirect could not be completed.");
-      }
-
+      if (!location || i === maxRedirects) throw new Error("The site redirect could not be completed.");
       current = new URL(location, current).toString();
       continue;
     }
@@ -167,42 +166,67 @@ async function fetchWithSafeRedirects(inputUrl, options = {}, maxRedirects = MAX
   throw new Error("Too many redirects.");
 }
 
-// ---------------- VIDEO HELPERS ----------------
+// ----------------------------------------------------
+// VIDEO DETECTION
+// ----------------------------------------------------
 
 const VIDEO_EXT = /\.(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|3gp|ogv)(?:$|[?#])/i;
 
-function looksLikeVideoResponse(response, url) {
+function looksLikeVideo(response, url) {
   const type = (response.headers.get("content-type") || "").toLowerCase();
   let pathname = "";
   try { pathname = new URL(url).pathname; } catch {}
 
   return (
     type.startsWith("video/") ||
-    type.includes("mp4") ||
-    type.includes("quicktime") ||
-    type.includes("webm") ||
-    type === "application/octet-stream" ||
+    (type === "application/octet-stream" && VIDEO_EXT.test(pathname)) ||
     VIDEO_EXT.test(pathname)
   );
 }
 
-function parseContentLength(response) {
-  const n = Number(response.headers.get("content-length"));
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
 function parseTotalSize(response) {
-  const length = parseContentLength(response);
-  if (length != null) return length;
+  const length = Number(response.headers.get("content-length"));
+  if (Number.isFinite(length) && length >= 0) return length;
 
   const range = response.headers.get("content-range") || "";
-  const m = range.match(/\/([0-9]+)$/);
-  return m ? Number(m[1]) : null;
+  const match = range.match(/\/([0-9]+)$/);
+  return match ? Number(match[1]) : null;
 }
 
-function tooLarge(size) {
-  return Number.isFinite(size) && size > MAX_FILE_BYTES;
+async function probeDirectVideo(url) {
+  try {
+    const { response, finalUrl } = await fetchWithSafeRedirects(url, { method: "HEAD" });
+    const direct = response.ok && looksLikeVideo(response, finalUrl);
+    const size = parseTotalSize(response);
+    await response.body?.cancel().catch(() => {});
+    if (direct) {
+      return {
+        direct: true,
+        url: finalUrl,
+        type: response.headers.get("content-type") || "video/mp4",
+        size
+      };
+    }
+  } catch {}
+
+  try {
+    const { response, finalUrl } = await fetchWithSafeRedirects(url, {
+      method: "GET",
+      headers: { Range: "bytes=0-0" }
+    });
+    const direct = (response.ok || response.status === 206) && looksLikeVideo(response, finalUrl);
+    const size = parseTotalSize(response);
+    const type = response.headers.get("content-type") || "video/mp4";
+    await response.body?.cancel().catch(() => {});
+    if (direct) return { direct: true, url: finalUrl, type, size };
+  } catch {}
+
+  return { direct: false };
 }
+
+// ----------------------------------------------------
+// FILE NAME / SIZE
+// ----------------------------------------------------
 
 function cleanFileName(value) {
   const cleaned = String(value || "EM-Fast-4K-Video")
@@ -210,312 +234,65 @@ function cleanFileName(value) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
-
   return cleaned || "EM-Fast-4K-Video";
 }
 
 function titleFromUrl(value) {
   try {
     const u = new URL(value);
-    const last = decodeURIComponent(
-      u.pathname.split("/").filter(Boolean).pop() || ""
-    );
-
-    return cleanFileName(
-      last.replace(/\.[a-z0-9]{2,5}$/i, "") || u.hostname
-    );
+    const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "");
+    return cleanFileName(last.replace(/\.[a-z0-9]{2,5}$/i, "") || u.hostname);
   } catch {
     return "EM-Fast-4K-Video";
   }
 }
 
+function tooLarge(size) {
+  return Number.isFinite(size) && size > MAX_FILE_BYTES;
+}
+
 function isYouTubeUrl(input) {
   try {
     const host = new URL(input).hostname.toLowerCase().replace(/^www\./, "");
-    return host === "youtube.com" ||
-      host.endsWith(".youtube.com") ||
-      host === "youtu.be";
+    return host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be";
   } catch {
     return false;
   }
 }
 
 function numberFromQuality(value) {
-  const m = String(value || "").match(/(\d{3,4})p/i);
-  return m ? Number(m[1]) : 0;
+  const match = String(value || "").match(/(\d{3,4})p/i);
+  return match ? Number(match[1]) : 0;
 }
 
 function getFormatSize(format) {
-  const raw =
-    format?.file_size ??
-    format?.filesize ??
-    format?.size ??
-    format?.size_mb;
-
+  const raw = format?.file_size ?? format?.filesize ?? format?.size ?? format?.size_mb;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return null;
-
-  if (
-    format?.size_mb != null &&
-    format?.file_size == null &&
-    format?.filesize == null &&
-    format?.size == null
-  ) {
+  // SaveAPI formats normally use bytes for file_size/size and MB for size_mb.
+  if (format?.size_mb != null && format?.file_size == null && format?.filesize == null && format?.size == null) {
     return n * 1024 * 1024;
   }
-
   return n;
 }
 
-// Read a small amount only for validation.
-// The bytes are returned so the real download stream does not lose them.
-async function readFirstChunk(body, maxBytes = 64 * 1024) {
-  const reader = body.getReader();
-  let received = new Uint8Array(0);
-
-  try {
-    while (received.byteLength < maxBytes) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value || !value.byteLength) continue;
-
-      const room = maxBytes - received.byteLength;
-      const part = value.byteLength <= room ? value : value.slice(0, room);
-
-      const merged = new Uint8Array(received.byteLength + part.byteLength);
-      merged.set(received, 0);
-      merged.set(part, received.byteLength);
-      received = merged;
-
-      // One chunk is enough for media signature validation.
-      if (received.byteLength >= 4096) break;
-    }
-  } catch (e) {
-    try { await reader.cancel(); } catch {}
-    throw e;
-  }
-
-  return { reader, first: received };
-}
-
-function mediaSignature(bytes) {
-  if (!bytes || bytes.byteLength < 4) return null;
-
-  const b = bytes;
-  const text = Buffer.from(b.slice(0, Math.min(b.byteLength, 64 * 1024))).toString("latin1");
-  const lower = text.toLowerCase();
-
-  // ISO Base Media / MP4 / MOV / M4V / 3GP: an ftyp box is normally near the start.
-  if (lower.includes("ftyp")) return "mp4";
-
-  // WebM / Matroska (EBML).
-  if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) {
-    return "webm";
-  }
-
-  // Flash Video.
-  if (b.byteLength >= 3 && b[0] === 0x46 && b[1] === 0x4c && b[2] === 0x56) {
-    return "flv";
-  }
-
-  // AVI: RIFF....AVI .
-  if (
-    b.byteLength >= 12 &&
-    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
-    b[8] === 0x41 && b[9] === 0x56 && b[10] === 0x49 && b[11] === 0x20
-  ) return "avi";
-
-  // OGG containers (often .ogv for video).
-  if (b.byteLength >= 4 && b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) {
-    return "ogv";
-  }
-
-  // MPEG-TS: sync byte at the beginning and again at the 188-byte boundary.
-  if (b.byteLength >= 376 && b[0] === 0x47 && b[188] === 0x47) {
-    return "ts";
-  }
-
-  // MPEG program stream.
-  if (b.byteLength >= 4 && b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x01 && b[3] === 0xba) {
-    return "mpeg";
-  }
-
-  return null;
-}
-
-function looksLikeMediaBytes(bytes) {
-  return Boolean(mediaSignature(bytes));
-}
-
-function isClearlyNonVideoContentType(type) {
-  const t = String(type || "").toLowerCase().split(";", 1)[0].trim();
-  return (
-    t.startsWith("image/") ||
-    t.startsWith("audio/") ||
-    t === "text/html" ||
-    t === "text/plain" ||
-    t === "application/json" ||
-    t === "application/xml" ||
-    t === "text/xml"
-  );
-}
-
-function extensionForMedia(contentType, finalUrl, signature) {
-  const type = String(contentType || "").toLowerCase();
-  if (signature === "webm" || type.includes("webm") || /\.webm(?:$|[?#])/i.test(finalUrl)) return "webm";
-  if (signature === "avi" || type.includes("x-msvideo") || /\.avi(?:$|[?#])/i.test(finalUrl)) return "avi";
-  if (signature === "flv" || type.includes("x-flv") || /\.flv(?:$|[?#])/i.test(finalUrl)) return "flv";
-  if (signature === "ogv" || type.includes("ogg") || /\.ogv(?:$|[?#])/i.test(finalUrl)) return "ogv";
-  if (signature === "ts" || type.includes("mp2t") || /\.(?:ts|m2ts)(?:$|[?#])/i.test(finalUrl)) return "ts";
-  if (signature === "mpeg" || type.includes("mpeg") || /\.(?:mpeg|mpg)(?:$|[?#])/i.test(finalUrl)) return "mpg";
-  return "mp4";
-}
-
-
-
-// Probe a URL without downloading the whole file.
-// A direct URL is considered usable only when it clearly looks like a video.
-// Some CDNs do not expose Content-Type correctly, so a Range request is also
-// accepted when the response has a video extension or a media signature.
-async function probeDirectVideo(inputUrl) {
-  try {
-    const head = await fetchWithSafeRedirects(inputUrl, {
-      method: "HEAD",
-      headers: {
-        accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5"
-      },
-      signal: AbortSignal.timeout(15000)
-    });
-
-    const headResponse = head.response;
-    const headSize = parseTotalSize(headResponse);
-    const headType = (headResponse.headers.get("content-type") || "").toLowerCase();
-    const headLooksVideo =
-      headResponse.ok &&
-      (
-        headType.startsWith("video/") ||
-        headType.includes("mp4") ||
-        headType.includes("quicktime") ||
-        headType.includes("webm") ||
-        VIDEO_EXT.test(head.finalUrl)
-      );
-
-    await headResponse.body?.cancel().catch(() => {});
-
-    if (headLooksVideo) {
-      return {
-        direct: true,
-        url: head.finalUrl,
-        size: headSize
-      };
-    }
-  } catch (_) {
-    // HEAD is not supported by many video/CDN servers. Try a small GET below.
-  }
-
-  try {
-    const got = await fetchWithSafeRedirects(inputUrl, {
-      method: "GET",
-      headers: {
-        Range: "bytes=0-65535",
-        accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
-        "accept-encoding": "identity"
-      },
-      signal: AbortSignal.timeout(15000)
-    });
-
-    const response = got.response;
-    const type = (response.headers.get("content-type") || "").toLowerCase();
-    const size = parseTotalSize(response);
-
-    if (!response.ok || !response.body) {
-      await response.body?.cancel().catch(() => {});
-      return { direct: false };
-    }
-
-    const { reader, first } = await readFirstChunk(response.body, 65536);
-
-    const media =
-      type.startsWith("video/") ||
-      type.includes("mp4") ||
-      type.includes("quicktime") ||
-      type.includes("webm") ||
-      VIDEO_EXT.test(got.finalUrl) ||
-      looksLikeMediaBytes(first);
-
-    try { await reader.cancel(); } catch {}
-
-    return {
-      direct: Boolean(media),
-      url: got.finalUrl,
-      size
-    };
-  } catch (_) {
-    return { direct: false };
-  }
-}
-
-// ---------------- SAVEAPI ----------------
-
-function saveApiErrorMessage(response, data) {
+function saveApiErrorMessage(apiResponse, data) {
   const code = data?.error?.code || "";
-
-  if (response.status === 429 || code === "RATE_LIMITED") {
-    return "SaveAPI rate limit reached. Please try again later.";
-  }
-
-  if (
-    response.status === 401 ||
-    code === "INVALID_API_KEY" ||
-    code === "MISSING_API_KEY"
-  ) {
-    return "SaveAPI key is invalid. Check Render → Environment Variables.";
-  }
-
-  if (code === "QUOTA_EXCEEDED") {
-    return "SaveAPI credit balance is empty. Please add credits and try again.";
-  }
-
-  if (code === "PRIVATE_CONTENT") {
-    return "This video is private and cannot be downloaded.";
-  }
-
-  if (code === "MEDIA_NOT_FOUND") {
-    return "The video was deleted, restricted, or has no downloadable media.";
-  }
-
-  if (code === "UNSUPPORTED_PLATFORM") {
-    return "This video site is not supported by SaveAPI.";
-  }
-
-  if (code === "INVALID_FORMAT") {
-    return "The requested YouTube quality is not available.";
-  }
-
-  if (code === "LINK_EXPIRED") {
-    return "The download link expired. Please try again.";
-  }
-
-  if (code === "UPSTREAM_TIMEOUT" || code === "UPSTREAM_ERROR") {
-    return "The video site did not respond. Please try again.";
-  }
-
-  return data?.error?.message ||
-    `SaveAPI request failed (HTTP ${response.status}).`;
+  if (apiResponse.status === 429 || code === "RATE_LIMITED") return "SaveAPI rate limit reached. Please try again later.";
+  if (apiResponse.status === 401 || code === "INVALID_API_KEY" || code === "MISSING_API_KEY") return "SaveAPI key is invalid. Check Render → Environment Variables.";
+  if (code === "QUOTA_EXCEEDED") return "SaveAPI credit balance is empty. Please add credits and try again.";
+  if (code === "PRIVATE_CONTENT") return "This video is private and cannot be downloaded.";
+  if (code === "MEDIA_NOT_FOUND") return "The video was deleted, restricted, or has no downloadable media.";
+  if (code === "UNSUPPORTED_PLATFORM") return "This video site is not supported by SaveAPI.";
+  if (code === "INVALID_FORMAT") return "The requested YouTube quality is not available.";
+  if (code === "LINK_EXPIRED") return "The download link expired. Please try again.";
+  if (code === "UPSTREAM_TIMEOUT" || code === "UPSTREAM_ERROR") return "The video site did not respond. Please try again.";
+  return data?.error?.message || `SaveAPI request failed (HTTP ${apiResponse.status}).`;
 }
 
-async function callSaveApi(endpoint, params, timeoutMs = 30000) {
-  if (!SAVEAPI_KEY) {
-    throw new Error(
-      "SAVEAPI_KEY is not configured in Render → Environment Variables."
-    );
-  }
-
-  const url = new URL(`${SAVEAPI_BASE}${endpoint}`);
-
-  for (const [key, value] of Object.entries(params || {})) {
-    url.searchParams.set(key, String(value));
-  }
+async function callSaveApi(pathname, params, timeoutMs = 30000) {
+  const url = new URL(`${SAVEAPI_BASE}${pathname}`);
+  for (const [key, value] of Object.entries(params || {})) url.searchParams.set(key, String(value));
 
   const response = await fetch(url, {
     method: "GET",
@@ -539,80 +316,62 @@ async function callSaveApi(endpoint, params, timeoutMs = 30000) {
   return data;
 }
 
+// ----------------------------------------------------
+// YOUTUBE — SaveAPI special two-step flow
+// ----------------------------------------------------
+
 async function prepareYouTube(inputUrl) {
-  const info = await callSaveApi(
-    "/youtube/info",
-    { url: inputUrl },
-    30000
-  );
+  const info = await callSaveApi("/youtube/info", { url: inputUrl }, 30000);
 
   const formats = Array.isArray(info?.formats)
     ? info.formats.filter(f => numberFromQuality(f?.quality) > 0)
     : [];
 
   if (!formats.length) {
-    throw new Error(
-      "SaveAPI did not return a downloadable YouTube video quality."
-    );
+    throw new Error("SaveAPI did not return a downloadable YouTube video quality.");
   }
 
+  // Highest available quality first, but never above 5 GB.
   const usable = formats
-    .map(f => ({
-      format: f,
-      height: numberFromQuality(f.quality),
-      size: getFormatSize(f)
-    }))
+    .map(f => ({ format: f, height: numberFromQuality(f.quality), size: getFormatSize(f) }))
     .filter(x => !tooLarge(x.size))
-    .sort((a, b) =>
-      b.height - a.height ||
-      ((b.size || 0) - (a.size || 0))
-    );
+    .sort((a, b) => b.height - a.height || ((b.size || 0) - (a.size || 0)));
 
   if (!usable.length) {
-    throw new Error(
-      "All available YouTube video qualities are larger than the 5 GB limit."
-    );
+    throw new Error("All available YouTube video qualities are larger than the 5 GB limit.");
   }
 
+  // The current SaveAPI YouTube API supports up to 1080p.
   const chosen = usable[0];
+  const quality = chosen.format.quality;
 
-  const made = await callSaveApi(
-    "/youtube/create",
-    {
-      url: inputUrl,
-      quality: chosen.format.quality
-    },
-    60000
-  );
+  const made = await callSaveApi("/youtube/create", {
+    url: inputUrl,
+    quality
+  }, 60000);
 
   if (!made?.url || typeof made.url !== "string") {
-    throw new Error(
-      "SaveAPI did not return a valid YouTube download stream."
-    );
+    throw new Error("SaveAPI did not return a valid YouTube download stream.");
   }
 
-  const madeSize = Number(made.file_size);
-  const size =
-    Number.isFinite(madeSize) && madeSize >= 0
-      ? madeSize
-      : chosen.size;
+  const size = Number(made.file_size);
+  const finalSize = Number.isFinite(size) && size >= 0 ? size : chosen.size;
 
-  if (tooLarge(size)) return { tooLarge: true };
+  if (tooLarge(finalSize)) {
+    return { tooLarge: true };
+  }
 
   return {
     url: made.url,
-    title: cleanFileName(
-      made.filename ||
-      made.title ||
-      info.title ||
-      titleFromUrl(inputUrl)
-    ),
-    size: Number.isFinite(size) ? size : null,
-    quality: chosen.format.quality
+    title: cleanFileName(made.filename || made.title || info.title || titleFromUrl(inputUrl)),
+    size: Number.isFinite(finalSize) ? finalSize : null,
+    quality
   };
 }
 
-// ---------------- HEALTH ----------------
+// ----------------------------------------------------
+// HEALTH CHECK
+// ----------------------------------------------------
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -620,41 +379,44 @@ app.get("/api/health", (_req, res) => {
     service: "EM Fast 4K",
     saveApiConfigured: Boolean(SAVEAPI_KEY),
     maxFileBytes: MAX_FILE_BYTES,
-    downloadMode: "server-stream-validated"
+    downloadMode: "server-stream"
   });
 });
 
-// ---------------- PREPARE ----------------
+// ----------------------------------------------------
+// PREPARE DOWNLOAD
+// ----------------------------------------------------
 
 app.post("/api/prepare", async (req, res) => {
   const inputUrl = String(req.body?.url || "").trim();
 
   if (!inputUrl || inputUrl.length > 3000) {
-    return res.status(400).json({
-      error: "Please provide a valid video link."
-    });
+    return res.status(400).json({ error: "Please provide a valid video link." });
   }
 
   try {
     await assertPublicHttpUrl(inputUrl);
 
-    // 1. Direct video URL: do not spend SaveAPI credits.
+    // 1) Direct file first — this avoids SaveAPI when the submitted URL is already a video file.
     const direct = await probeDirectVideo(inputUrl);
 
     if (direct.direct) {
-      if (tooLarge(direct.size)) {
-        return res.status(413).json({
-          error: "Maximum file size is 5 GB."
-        });
+      if (tooLarge(direct.size)) return res.status(413).json({ error: "Maximum file size is 5 GB." });
+
+      if (direct.size == null) {
+        try {
+          const verified = await fetchWithSafeRedirects(direct.url, { method: "HEAD" });
+          const verifiedSize = parseTotalSize(verified.response);
+          await verified.response.body?.cancel().catch(() => {});
+          if (tooLarge(verifiedSize)) return res.status(413).json({ error: "Maximum file size is 5 GB." });
+          if (Number.isFinite(verifiedSize)) direct.size = verifiedSize;
+        } catch {}
       }
 
       const title = cleanFileName(titleFromUrl(direct.url));
-
       return res.json({
         ok: true,
-        directUrl:
-          `/api/download?url=${encodeURIComponent(direct.url)}` +
-          `&name=${encodeURIComponent(title)}`,
+        directUrl: `/api/download?url=${encodeURIComponent(direct.url)}&name=${encodeURIComponent(title)}`,
         title,
         method: "direct",
         size: direct.size
@@ -663,26 +425,23 @@ app.post("/api/prepare", async (req, res) => {
 
     if (!SAVEAPI_KEY) {
       return res.status(503).json({
-        error:
-          "This link is not a direct video file. Add SAVEAPI_KEY in Render → Environment Variables."
+        error: "This link is not a direct video file. Add SAVEAPI_KEY in Render → Environment Variables."
       });
     }
 
-    // 2. YouTube special flow.
+    // 2) YouTube must use SaveAPI's dedicated two-step API.
     if (isYouTubeUrl(inputUrl)) {
       const yt = await prepareYouTube(inputUrl);
 
       if (yt.tooLarge) {
-        return res.status(413).json({
-          error: "Maximum file size is 5 GB."
-        });
+        return res.status(413).json({ error: "Maximum file size is 5 GB." });
       }
 
+      // IMPORTANT: YouTube's SaveAPI URL is a signed stream with no Range/Content-Length.
+      // Do not probe it with Range here. Render streams it to the browser in /api/download.
       return res.json({
         ok: true,
-        directUrl:
-          `/api/download?url=${encodeURIComponent(yt.url)}` +
-          `&name=${encodeURIComponent(yt.title)}`,
+        directUrl: `/api/download?url=${encodeURIComponent(yt.url)}&name=${encodeURIComponent(yt.title)}`,
         title: yt.title,
         method: "saveapi-youtube",
         quality: yt.quality,
@@ -690,19 +449,13 @@ app.post("/api/prepare", async (req, res) => {
       });
     }
 
-    // 3. Other supported platforms.
+    // 3) Other supported platforms use the normal /v1/download endpoint.
     let data;
-
     try {
-      data = await callSaveApi(
-        "/download",
-        { url: inputUrl },
-        30000
-      );
+      data = await callSaveApi("/download", { url: inputUrl }, 30000);
     } catch (error) {
-      return res.status(error.httpStatus === 429 ? 429 : 502).json({
-        error: error.message
-      });
+      const status = error.httpStatus === 429 ? 429 : 502;
+      return res.status(status).json({ error: error.message });
     }
 
     const candidates = [
@@ -716,338 +469,342 @@ app.post("/api/prepare", async (req, res) => {
       (
         item.type === "video" ||
         VIDEO_EXT.test(item.url) ||
-        /mp4|video/i.test(
-          String(item.ext || item.mime || item.content_type || "")
-        )
+        /mp4|video/i.test(String(item.ext || item.mime || item.content_type || ""))
       )
     );
 
     candidates.sort((a, b) => {
       const aq = Number(a?.height || a?.quality_height || 0);
       const bq = Number(b?.height || b?.quality_height || 0);
-
       if (aq !== bq) return bq - aq;
-
-      const as = Number(
-        a?.file_size ??
-        a?.filesize ??
-        a?.size ??
-        a?.size_mb ??
-        0
-      );
-
-      const bs = Number(
-        b?.file_size ??
-        b?.filesize ??
-        b?.size ??
-        b?.size_mb ??
-        0
-      );
-
+      const as = Number(a?.size_mb || a?.size || a?.filesize || a?.file_size || 0);
+      const bs = Number(b?.size_mb || b?.size || b?.filesize || b?.file_size || 0);
       return bs - as;
     });
 
     const media = candidates[0] || null;
-
     if (!media) {
-      return res.status(422).json({
-        error:
-          "SaveAPI did not return a downloadable video for this link."
-      });
+      return res.status(422).json({ error: "SaveAPI did not return a downloadable video for this link." });
     }
 
     await assertPublicHttpUrl(media.url);
 
-    let size = Number(
-      media.file_size ??
-      media.filesize ??
-      media.size ??
-      media.content_length
-    );
-
-    if (
-      !Number.isFinite(size) &&
-      Number.isFinite(Number(media.size_mb))
-    ) {
-      size = Number(media.size_mb) * 1024 * 1024;
-    }
-
+    let size = Number(media.file_size ?? media.filesize ?? media.size ?? media.content_length);
+    if (!Number.isFinite(size) && Number.isFinite(Number(media.size_mb))) size = Number(media.size_mb) * 1024 * 1024;
     if (!Number.isFinite(size)) size = null;
 
-    if (tooLarge(size)) {
-      return res.status(413).json({
-        error: "Maximum file size is 5 GB."
+    if (tooLarge(size)) return res.status(413).json({ error: "Maximum file size is 5 GB." });
+
+    // Normal social-media CDN links usually support a tiny Range request.
+    // If a provider does not expose Range/Content-Length, do not reject a valid video URL solely for that reason.
+    try {
+      const check = await fetchWithSafeRedirects(media.url, {
+        method: "GET",
+        headers: {
+          Range: "bytes=0-0",
+          Accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
+          "accept-encoding": "identity"
+        },
+        signal: AbortSignal.timeout(15000)
       });
+
+      const checkType = (check.response.headers.get("content-type") || "").toLowerCase();
+      const checkSize = parseTotalSize(check.response);
+      const hasVideoType =
+        checkType.startsWith("video/") ||
+        checkType === "application/octet-stream" ||
+        VIDEO_EXT.test(check.finalUrl);
+
+      await check.response.body?.cancel().catch(() => {});
+
+      if (!check.response.ok && check.response.status !== 206) {
+        return res.status(502).json({ error: "The video download server did not return the file. Please try again." });
+      }
+
+      if (!hasVideoType && !media.type?.toLowerCase?.().includes("video")) {
+        return res.status(502).json({ error: "The returned file is not a video. Please try again." });
+      }
+
+      if (size == null && Number.isFinite(checkSize)) size = checkSize;
+      if (tooLarge(size)) return res.status(413).json({ error: "Maximum file size is 5 GB." });
+    } catch {
+      // Do not fail here just because the CDN blocks a HEAD/Range probe.
+      // /api/download will make the real streaming request.
     }
 
-    const title = cleanFileName(
-      data?.meta?.title ||
-      data?.title ||
-      media?.title ||
-      titleFromUrl(inputUrl)
-    );
+    const title = cleanFileName(data?.meta?.title || data?.title || media?.title || titleFromUrl(inputUrl));
 
     return res.json({
       ok: true,
-      directUrl:
-        `/api/download?url=${encodeURIComponent(media.url)}` +
-        `&name=${encodeURIComponent(title)}`,
+      directUrl: `/api/download?url=${encodeURIComponent(media.url)}&name=${encodeURIComponent(title)}`,
       title,
       method: "saveapi",
       size
     });
   } catch (error) {
-    const message =
-      error?.name === "TimeoutError"
-        ? "The site took too long to respond. Please try again."
-        : (error.message || "The link could not be processed.");
+    const message = error?.name === "TimeoutError"
+      ? "The site took too long to respond. Please try again."
+      : (error.message || "The link could not be processed.");
 
-    return res.status(error.httpStatus === 429 ? 429 : 400).json({
-      error: message
-    });
+    return res.status(error.httpStatus === 429 ? 429 : 400).json({ error: message });
   }
 });
 
-// ---------------- REAL STREAM ----------------
-//
-// Important fixes:
-// 1. Never send Content-Length from an untrusted API size.
-// 2. Read and validate the first media bytes BEFORE creating the download.
-// 3. Do not create a 0-byte/HTML file when the upstream server returns an error.
-// 4. Stream chunks directly; never buffer the whole video in Render RAM.
-// 5. Abort cleanly if the upstream ends unexpectedly.
+// ----------------------------------------------------
+// DOWNLOAD DIAGNOSTICS
+// ----------------------------------------------------
+
+function bytesToHex(bytes, max = 24) {
+  return Buffer.from(bytes.subarray(0, max)).toString("hex");
+}
+
+function bytesToAscii(bytes, max = 80) {
+  return Buffer.from(bytes.subarray(0, max))
+    .toString("utf8")
+    .replace(/[^\x20-\x7E]/g, ".");
+}
+
+function diagnoseFirstChunk(bytes, contentType) {
+  const lowerType = String(contentType || "").toLowerCase();
+  const text = bytesToAscii(bytes).toLowerCase();
+
+  const looksText =
+    lowerType.includes("text/html") ||
+    lowerType.includes("application/json") ||
+    text.startsWith("<!doctype") ||
+    text.startsWith("<html") ||
+    text.startsWith("{") ||
+    text.startsWith("[");
+
+  const looksImage =
+    lowerType.startsWith("image/") ||
+    bytes.length >= 4 && (
+      bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff || // JPEG
+      bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 || // PNG
+      bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 // GIF
+    );
+
+  const hasMp4 =
+    bytes.length >= 8 &&
+    Buffer.from(bytes).subarray(4, Math.min(bytes.length, 64)).includes(Buffer.from("ftyp"));
+
+  const hasWebm =
+    bytes.length >= 4 &&
+    bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+
+  return { looksText, looksImage, hasMp4, hasWebm, text };
+}
+
+// ----------------------------------------------------
+// SECURE VIDEO STREAM / DOWNLOAD
+// ----------------------------------------------------
 
 app.get("/api/download", async (req, res) => {
   const inputUrl = String(req.query?.url || "").trim();
+  const requestId = Math.random().toString(36).slice(2, 9);
+
+  console.log(`[DOWNLOAD ${requestId}] START url-host=${(() => { try { return new URL(inputUrl).hostname; } catch { return "invalid"; } })()}`);
+
+  res.on("finish", () => {
+    console.log(`[DOWNLOAD ${requestId}] RESPONSE FINISH status=${res.statusCode} bytes-sent=${res.getHeader("Content-Length") || "chunked"}`);
+  });
+  res.on("close", () => {
+    console.log(`[DOWNLOAD ${requestId}] RESPONSE CLOSE headersSent=${res.headersSent} writableEnded=${res.writableEnded}`);
+  });
 
   if (!inputUrl || inputUrl.length > 16000) {
-    return res.status(400).json({
-      error: "The download link is not valid."
-    });
+    console.error(`[DOWNLOAD ${requestId}] ERROR invalid download URL`);
+    return res.status(400).json({ error: "The download link is not valid." });
   }
-
-  let upstreamBody = null;
-  let upstreamReader = null;
 
   try {
     await assertPublicHttpUrl(inputUrl);
 
-    const { response, finalUrl } = await fetchWithSafeRedirects(
-      inputUrl,
-      {
-        method: "GET",
-        headers: {
-          accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
-          "accept-encoding": "identity"
-        },
-        signal: AbortSignal.timeout(180000)
-      }
+    const { response, finalUrl } = await fetchWithSafeRedirects(inputUrl, {
+      method: "GET",
+      headers: {
+        accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
+        "accept-encoding": "identity"
+      },
+      signal: AbortSignal.timeout(120000)
+    });
+
+    const upstreamType = response.headers.get("content-type") || "";
+    const upstreamLength = parseTotalSize(response);
+
+    console.log(
+      `[DOWNLOAD ${requestId}] UPSTREAM status=${response.status} type=${upstreamType || "none"} ` +
+      `length=${Number.isFinite(upstreamLength) ? upstreamLength : "unknown"} final-host=${(() => { try { return new URL(finalUrl).hostname; } catch { return "invalid"; } })()}`
     );
 
-    upstreamBody = response.body;
-
-    if (!response.ok || !upstreamBody) {
-      await upstreamBody?.cancel().catch(() => {});
+    if (!response.ok || !response.body) {
+      await response.body?.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] ERROR upstream unavailable HTTP=${response.status}`);
       return res.status(502).json({
-        error:
-          `The video server could not provide the download (HTTP ${response.status}).`
+        error: `The video server could not provide the download (HTTP ${response.status}).`
       });
     }
 
-    const upstreamType =
-      (response.headers.get("content-type") || "").toLowerCase();
-
-    const upstreamSize = parseTotalSize(response);
-
-    if (tooLarge(upstreamSize)) {
-      await upstreamBody.cancel().catch(() => {});
-      return res.status(413).json({
-        error: "Maximum file size is 5 GB."
-      });
-    }
-
-    // Get first bytes before sending ANY download headers.
-    const firstRead = await readFirstChunk(upstreamBody, 64 * 1024);
-    upstreamReader = firstRead.reader;
-    const firstBytes = firstRead.first;
-
-    if (!firstBytes.byteLength) {
-      try { await upstreamReader.cancel(); } catch {}
+    if (Number.isFinite(upstreamLength) && upstreamLength <= 0) {
+      await response.body.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] ZERO_BYTES content-length=${upstreamLength}`);
       return res.status(502).json({
-        error:
-          "The video server returned an empty file. No download was created."
+        error: "Download failed: the source server returned a 0-byte file."
       });
     }
 
-    const cleanType = upstreamType.split(";", 1)[0].trim();
-    const signature = mediaSignature(firstBytes);
-    const typeLooksVideo = cleanType.startsWith("video/") ||
-      cleanType.includes("mp4") ||
-      cleanType.includes("quicktime") ||
-      cleanType.includes("webm") ||
-      cleanType.includes("x-matroska") ||
-      cleanType.includes("x-msvideo") ||
-      cleanType.includes("x-flv") ||
-      cleanType.includes("ogg") ||
-      cleanType.includes("mpeg");
+    if (tooLarge(upstreamLength)) {
+      await response.body.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] ERROR file larger than 5GB size=${upstreamLength}`);
+      return res.status(413).json({ error: "Maximum file size is 5 GB." });
+    }
 
-    // Never turn an image/audio/HTML/JSON response into an .mp4 file.
-    // This is the important protection against the black/0-byte downloads.
-    if (isClearlyNonVideoContentType(cleanType)) {
-      try { await upstreamReader.cancel(); } catch {}
+    // Read the first real chunk BEFORE sending download headers.
+    // This lets us stop a true 0-byte/HTML/image response and show a useful error.
+    const reader = response.body.getReader();
+    const firstRead = await reader.read();
+
+    if (firstRead.done || !firstRead.value || firstRead.value.byteLength === 0) {
+      await reader.cancel().catch(() => {});
+      console.error(
+        `[DOWNLOAD ${requestId}] ZERO_BYTES_STREAM status=${response.status} ` +
+        `type=${upstreamType || "none"} length=${Number.isFinite(upstreamLength) ? upstreamLength : "unknown"}`
+      );
       return res.status(502).json({
-        error: "The source returned an image, audio file, or webpage instead of a video. No video download was created."
+        error: "Download failed: the source returned 0 bytes. No video data was received."
       });
     }
 
-    // If the server says video/*, accept it only when it is not obviously an error.
-    // For generic application/octet-stream, a real video signature is REQUIRED.
-    const genericBinary = !cleanType ||
-      cleanType === "application/octet-stream" ||
-      cleanType === "binary/octet-stream";
+    const firstBytes = firstRead.value;
+    const diagnosis = diagnoseFirstChunk(firstBytes, upstreamType);
 
-    const obviouslyText = /^(<!doctype|<html|\{\s*["']?(error|message|success)|access denied|forbidden)/i
-      .test(Buffer.from(firstBytes.slice(0, 4096)).toString("utf8").trim());
-
-    if (obviouslyText || (genericBinary && !signature) || (!typeLooksVideo && !signature)) {
-      try { await upstreamReader.cancel(); } catch {}
-      return res.status(502).json({
-        error: "The source did not return a valid video file. No download was created."
-      });
-    }
-
-    const requestedName = cleanFileName(
-      String(req.query?.name || "").trim()
+    console.log(
+      `[DOWNLOAD ${requestId}] FIRST_CHUNK bytes=${firstBytes.byteLength} ` +
+      `hex=${bytesToHex(firstBytes)} ascii=${bytesToAscii(firstBytes)} ` +
+      `mp4=${diagnosis.hasMp4} webm=${diagnosis.hasWebm} image=${diagnosis.looksImage} text=${diagnosis.looksText}`
     );
 
+    // Do not save an image or HTML/JSON error page as an MP4.
+    if (diagnosis.looksImage) {
+      await reader.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] WRONG_FILE image-response detected type=${upstreamType}`);
+      return res.status(502).json({
+        error: "Download failed: the source returned an image instead of a video."
+      });
+    }
+
+    if (diagnosis.looksText) {
+      await reader.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] WRONG_FILE text-error-response detected type=${upstreamType}`);
+      return res.status(502).json({
+        error: "Download failed: the source returned an error page instead of video data."
+      });
+    }
+
+    const requestedName = cleanFileName(String(req.query?.name || "").trim());
     const fallbackName = titleFromUrl(finalUrl);
+    const fileName = cleanFileName(requestedName || fallbackName) || "EM-Fast-4K-Video";
+    const contentType = upstreamType || "video/mp4";
 
-    const fileName =
-      cleanFileName(requestedName || fallbackName) ||
-      "EM-Fast-4K-Video";
-
-    // Preserve the real media type and extension. Never blindly label an
-    // unknown binary response as MP4.
-    const extension = extensionForMedia(upstreamType, finalUrl, signature);
-    let contentType = cleanType;
-
-    if (!contentType ||
-        contentType === "application/octet-stream" ||
-        contentType === "binary/octet-stream") {
-      const byExt = {
-        mp4: "video/mp4", webm: "video/webm", avi: "video/x-msvideo",
-        flv: "video/x-flv", ogv: "video/ogg", ts: "video/mp2t", mpg: "video/mpeg"
-      };
-      contentType = byExt[extension] || "video/mp4";
-    }
-
-    // Do NOT send upstream Content-Length.
-    // A stale/mismatched Content-Length can produce broken/0:00 files.
     res.status(200);
     res.setHeader("Content-Type", contentType);
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${fileName.replace(/"/g, "")}.${extension}"`
-    );
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName.replace(/"/g, "")}.mp4"`);
+    res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Accept-Ranges", "none");
+    if (Number.isFinite(upstreamLength)) res.setHeader("Content-Length", String(upstreamLength));
 
     let totalBytes = 0;
 
-    // Send the validated first bytes.
-    totalBytes += firstBytes.byteLength;
-
-    if (totalBytes > MAX_FILE_BYTES) {
-      res.destroy();
-      return;
-    }
-
-    if (!res.write(Buffer.from(firstBytes))) {
-      await new Promise(resolve => res.once("drain", resolve));
-    }
-
-    // Continue from the same reader. Nothing was lost.
-    while (true) {
-      const { value, done } = await upstreamReader.read();
-
-      if (done) break;
-
-      if (!value || !value.byteLength) continue;
-
-      totalBytes += value.byteLength;
-
+    try {
+      totalBytes += firstBytes.byteLength;
       if (totalBytes > MAX_FILE_BYTES) {
-        try { await upstreamReader.cancel(); } catch {}
-        if (!res.destroyed) res.destroy();
+        await reader.cancel().catch(() => {});
+        res.destroy();
+        console.error(`[DOWNLOAD ${requestId}] ERROR exceeded 5GB after first chunk`);
         return;
       }
 
-      const chunk = Buffer.from(value);
+      if (!res.write(firstBytes)) await new Promise(resolve => res.once("drain", resolve));
 
-      if (!res.write(chunk)) {
-        await new Promise(resolve => res.once("drain", resolve));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.byteLength === 0) continue;
+
+        totalBytes += value.byteLength;
+
+        if (totalBytes > MAX_FILE_BYTES) {
+          await reader.cancel().catch(() => {});
+          res.destroy();
+          console.error(`[DOWNLOAD ${requestId}] ERROR exceeded 5GB bytes=${totalBytes}`);
+          return;
+        }
+
+        if (!res.write(value)) await new Promise(resolve => res.once("drain", resolve));
       }
-    }
 
-    if (totalBytes <= 0) {
-      if (!res.destroyed) res.destroy();
-      return;
-    }
+      if (totalBytes === 0) {
+        if (!res.headersSent) {
+          return res.status(502).json({ error: "Download failed: 0 bytes were received." });
+        }
+        res.destroy();
+        console.error(`[DOWNLOAD ${requestId}] ZERO_BYTES_AFTER_STREAM`);
+        return;
+      }
 
-    if (!res.destroyed) res.end();
+      console.log(`[DOWNLOAD ${requestId}] SUCCESS total-bytes=${totalBytes} content-type=${contentType}`);
+      res.end();
+    } catch (streamError) {
+      console.error(
+        `[DOWNLOAD ${requestId}] STREAM_ERROR name=${streamError?.name || "Error"} ` +
+        `message=${streamError?.message || streamError} bytes=${totalBytes}`
+      );
+      if (!res.destroyed) res.destroy(streamError);
+    }
   } catch (error) {
-    try {
-      if (upstreamReader) await upstreamReader.cancel();
-    } catch {}
+    console.error(
+      `[DOWNLOAD ${requestId}] REQUEST_ERROR name=${error?.name || "Error"} ` +
+      `message=${error?.message || error}`
+    );
 
-    if (res.headersSent) {
-      if (!res.destroyed) res.destroy();
-      return;
-    }
+    if (res.headersSent) return res.destroy(error);
 
-    const message =
-      error?.name === "TimeoutError"
-        ? "The video server took too long to respond. Please try again."
-        : (error.message || "The video could not be downloaded.");
+    const message = error?.name === "TimeoutError"
+      ? "The video server took too long to respond. Please try again."
+      : (error.message || "The video could not be downloaded.");
 
     return res.status(502).json({ error: message });
   }
 });
 
-// ---------------- SPA FALLBACK ----------------
+// ----------------------------------------------------
+// EXPRESS 5 SPA FALLBACK
+// ----------------------------------------------------
 
 app.get("/{*splat}", (req, res, next) => {
   if (req.path.startsWith("/api/")) return next();
-
   res.sendFile(INDEX_FILE, err => {
     if (err && !res.headersSent) {
-      res.status(404).send(
-        "index.html could not be found. Put index.html in the project root or public/index.html."
-      );
+      res.status(404).send("index.html could not be found. Put index.html in the project root or public/index.html.");
     }
   });
 });
 
-// ---------------- ERROR HANDLER ----------------
+// ----------------------------------------------------
+// ERROR HANDLER
+// ----------------------------------------------------
 
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err.message);
-
-  if (!res.headersSent) {
-    res.status(500).json({
-      error: "A server error occurred. Please try again later."
-    });
-  }
+  if (!res.headersSent) res.status(500).json({ error: "A server error occurred. Please try again later." });
 });
 
-// ---------------- START ----------------
+// ----------------------------------------------------
+// START SERVER
+// ----------------------------------------------------
 
 app.listen(PORT, () => {
   console.log(`EM Fast 4K running on port ${PORT}`);
   console.log(`Maximum file size: ${MAX_FILE_BYTES} bytes (5 GB)`);
-  console.log(
-    `SaveAPI configured: ${SAVEAPI_KEY ? "YES" : "NO"}`
-  );
+  if (!SAVEAPI_KEY) console.warn("SAVEAPI_KEY is not set. Direct video URLs can still work; social links need SaveAPI.");
 });
