@@ -331,7 +331,7 @@ async function prepareYouTube(inputUrl) {
     throw new Error("SaveAPI did not return a downloadable YouTube video quality.");
   }
 
-  // Highest available quality first, but never above 5 GB.
+  // Pick the highest available quality that stays within the 5 GB limit.
   const usable = formats
     .map(f => ({ format: f, height: numberFromQuality(f.quality), size: getFormatSize(f) }))
     .filter(x => !tooLarge(x.size))
@@ -341,31 +341,13 @@ async function prepareYouTube(inputUrl) {
     throw new Error("All available YouTube video qualities are larger than the 5 GB limit.");
   }
 
-  // The current SaveAPI YouTube API supports up to 1080p.
   const chosen = usable[0];
-  const quality = chosen.format.quality;
-
-  const made = await callSaveApi("/youtube/create", {
-    url: inputUrl,
-    quality
-  }, 60000);
-
-  if (!made?.url || typeof made.url !== "string") {
-    throw new Error("SaveAPI did not return a valid YouTube download stream.");
-  }
-
-  const size = Number(made.file_size);
-  const finalSize = Number.isFinite(size) && size >= 0 ? size : chosen.size;
-
-  if (tooLarge(finalSize)) {
-    return { tooLarge: true };
-  }
+  const size = chosen.size;
 
   return {
-    url: made.url,
-    title: cleanFileName(made.filename || made.title || info.title || titleFromUrl(inputUrl)),
-    size: Number.isFinite(finalSize) ? finalSize : null,
-    quality
+    title: cleanFileName(info.title || titleFromUrl(inputUrl)),
+    size: Number.isFinite(size) ? size : null,
+    quality: chosen.format.quality
   };
 }
 
@@ -437,11 +419,12 @@ app.post("/api/prepare", async (req, res) => {
         return res.status(413).json({ error: "Maximum file size is 5 GB." });
       }
 
-      // IMPORTANT: YouTube's SaveAPI URL is a signed stream with no Range/Content-Length.
-      // Do not probe it with Range here. Render streams it to the browser in /api/download.
+      // IMPORTANT: Do not create the signed YouTube URL here. SaveAPI signs the
+      // stream to the requesting server/IP and the stream is one-pass. We create
+      // it inside the actual download request and immediately stream it onward.
       return res.json({
         ok: true,
-        directUrl: `/api/download?url=${encodeURIComponent(yt.url)}&name=${encodeURIComponent(yt.title)}`,
+        directUrl: `/api/youtube-download?url=${encodeURIComponent(inputUrl)}&quality=${encodeURIComponent(yt.quality)}&name=${encodeURIComponent(yt.title)}`,
         title: yt.title,
         method: "saveapi-youtube",
         quality: yt.quality,
@@ -554,6 +537,158 @@ app.post("/api/prepare", async (req, res) => {
 // SECURE VIDEO STREAM / DOWNLOAD
 // ----------------------------------------------------
 
+async function streamUpstreamToResponse(response, res, fileName, fallbackName, knownSize = null) {
+  if (!response.ok || !response.body) {
+    await response.body?.cancel().catch(() => {});
+    return { ok: false, status: 502, error: `The video server could not provide the download (HTTP ${response.status}).` };
+  }
+
+  const upstreamSize = parseTotalSize(response);
+  const effectiveSize = Number.isFinite(knownSize) ? knownSize : upstreamSize;
+
+  if (tooLarge(effectiveSize)) {
+    await response.body.cancel().catch(() => {});
+    return { ok: false, status: 413, error: "Maximum file size is 5 GB." };
+  }
+
+  const contentType = (response.headers.get("content-type") || "video/mp4").toLowerCase();
+  if (contentType.startsWith("text/html") || contentType.startsWith("application/json")) {
+    await response.body.cancel().catch(() => {});
+    return { ok: false, status: 502, error: "The video server returned an invalid media response. Please try again." };
+  }
+
+  // Do NOT reject Content-Length: 0 or a missing Content-Length here. SaveAPI's
+  // YouTube stream intentionally has no Content-Length and is read one pass.
+  // Instead, read the first real chunk and only then send download headers.
+  const reader = response.body.getReader();
+  let first;
+  try {
+    first = await reader.read();
+  } catch (error) {
+    try { await reader.cancel(); } catch {}
+    return { ok: false, status: 502, error: "The video stream could not be started. Please try again." };
+  }
+
+  if (first.done || !first.value || first.value.byteLength === 0) {
+    try { await reader.cancel(); } catch {}
+    return { ok: false, status: 502, error: "The video server returned an empty file. Please try again." };
+  }
+
+  const safeName = cleanFileName(fileName || fallbackName) || "EM-Fast-4K-Video";
+  const finalName = /\.(mp4|m4v|mov|webm|mkv)$/i.test(safeName) ? safeName : `${safeName}.mp4`;
+
+  res.status(200);
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", `attachment; filename="${finalName.replace(/"/g, "")}"`);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (Number.isFinite(effectiveSize) && effectiveSize > 0) {
+    res.setHeader("Content-Length", String(effectiveSize));
+  }
+
+  let totalBytes = 0;
+
+  try {
+    totalBytes += first.value.byteLength;
+    if (totalBytes > MAX_FILE_BYTES) {
+      res.destroy();
+      return { ok: false, status: 413, error: "Maximum file size is 5 GB." };
+    }
+
+    if (!res.write(first.value)) await new Promise(resolve => res.once("drain", resolve));
+
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (!next.value || next.value.byteLength === 0) continue;
+
+      totalBytes += next.value.byteLength;
+      if (totalBytes > MAX_FILE_BYTES) {
+        res.destroy();
+        return { ok: false, status: 413, error: "Maximum file size is 5 GB." };
+      }
+
+      if (!res.write(next.value)) await new Promise(resolve => res.once("drain", resolve));
+    }
+
+    res.end();
+    return { ok: true, bytes: totalBytes };
+  } catch (streamError) {
+    if (!res.destroyed) res.destroy(streamError);
+    return { ok: false, status: 502, error: "The video download stream was interrupted. Please try again." };
+  }
+}
+
+// ----------------------------------------------------
+// YOUTUBE STREAM / DOWNLOAD
+// ----------------------------------------------------
+
+app.get("/api/youtube-download", async (req, res) => {
+  const inputUrl = String(req.query?.url || "").trim();
+  const quality = String(req.query?.quality || "").trim();
+  const requestedName = cleanFileName(String(req.query?.name || "").trim());
+
+  if (!inputUrl || inputUrl.length > 3000 || !isYouTubeUrl(inputUrl)) {
+    return res.status(400).json({ error: "The YouTube link is not valid." });
+  }
+
+  if (!/^(144|240|360|480|720|1080)p$/i.test(quality)) {
+    return res.status(400).json({ error: "The selected YouTube quality is not valid." });
+  }
+
+  try {
+    await assertPublicHttpUrl(inputUrl);
+
+    // Create and consume the signed URL in the SAME request. This avoids the
+    // IP-binding/expiry problem caused by creating the URL during /api/prepare.
+    const made = await callSaveApi("/youtube/create", {
+      url: inputUrl,
+      quality
+    }, 60000);
+
+    if (!made?.url || typeof made.url !== "string") {
+      return res.status(502).json({ error: "SaveAPI did not return a valid YouTube download stream." });
+    }
+
+    const size = Number(made.file_size);
+    const knownSize = Number.isFinite(size) && size >= 0 ? size : null;
+    if (tooLarge(knownSize)) {
+      return res.status(413).json({ error: "Maximum file size is 5 GB." });
+    }
+
+    await assertPublicHttpUrl(made.url);
+
+    const { response, finalUrl } = await fetchWithSafeRedirects(made.url, {
+      method: "GET",
+      headers: {
+        Accept: "video/mp4,video/*,application/octet-stream;q=0.9,*/*;q=0.5",
+        "accept-encoding": "identity"
+      },
+      // The stream can be large; this timeout is only for the upstream request/stream.
+      signal: AbortSignal.timeout(15 * 60 * 1000)
+    });
+
+    const fallbackName = cleanFileName(made.filename || made.title || requestedName || titleFromUrl(finalUrl));
+    const result = await streamUpstreamToResponse(response, res, requestedName || fallbackName, fallbackName, knownSize);
+
+    if (!result.ok && !res.headersSent) {
+      return res.status(result.status || 502).json({ error: result.error });
+    }
+  } catch (error) {
+    if (res.headersSent) return res.destroy(error);
+
+    const message = error?.name === "TimeoutError"
+      ? "The YouTube download took too long to start. Please try again."
+      : (error.message || "The YouTube video could not be downloaded.");
+
+    return res.status(error.httpStatus === 429 ? 429 : 502).json({ error: message });
+  }
+});
+
+// ----------------------------------------------------
+// SECURE VIDEO STREAM / DOWNLOAD
+// ----------------------------------------------------
+
 app.get("/api/download", async (req, res) => {
   const inputUrl = String(req.query?.url || "").trim();
 
@@ -570,54 +705,15 @@ app.get("/api/download", async (req, res) => {
         accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
         "accept-encoding": "identity"
       },
-      signal: AbortSignal.timeout(120000)
+      signal: AbortSignal.timeout(15 * 60 * 1000)
     });
-
-    if (!response.ok || !response.body) {
-      await response.body?.cancel().catch(() => {});
-      return res.status(502).json({
-        error: `The video server could not provide the download (HTTP ${response.status}).`
-      });
-    }
-
-    const contentLength = parseTotalSize(response);
-
-    if (Number.isFinite(contentLength) && contentLength <= 0) {
-      await response.body.cancel().catch(() => {});
-      return res.status(502).json({ error: "The video server returned a 0-byte file. Please try again." });
-    }
-
-    if (tooLarge(contentLength)) {
-      await response.body.cancel().catch(() => {});
-      return res.status(413).json({ error: "Maximum file size is 5 GB." });
-    }
 
     const requestedName = cleanFileName(String(req.query?.name || "").trim());
     const fallbackName = titleFromUrl(finalUrl);
-    const fileName = cleanFileName(requestedName || fallbackName) || "EM-Fast-4K-Video";
-    const contentType = response.headers.get("content-type") || "video/mp4";
+    const result = await streamUpstreamToResponse(response, res, requestedName, fallbackName, null);
 
-    res.status(200);
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName.replace(/"/g, "")}.mp4"`);
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    if (Number.isFinite(contentLength)) res.setHeader("Content-Length", String(contentLength));
-
-    let totalBytes = 0;
-
-    try {
-      for await (const chunk of response.body) {
-        totalBytes += chunk.byteLength;
-        if (totalBytes > MAX_FILE_BYTES) {
-          res.destroy();
-          return;
-        }
-        if (!res.write(chunk)) await new Promise(resolve => res.once("drain", resolve));
-      }
-      res.end();
-    } catch (streamError) {
-      if (!res.destroyed) res.destroy(streamError);
+    if (!result.ok && !res.headersSent) {
+      return res.status(result.status || 502).json({ error: result.error });
     }
   } catch (error) {
     if (res.headersSent) return res.destroy(error);
@@ -629,7 +725,6 @@ app.get("/api/download", async (req, res) => {
     return res.status(502).json({ error: message });
   }
 });
-
 // ----------------------------------------------------
 // EXPRESS 5 SPA FALLBACK
 // ----------------------------------------------------
