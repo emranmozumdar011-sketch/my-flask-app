@@ -1,7 +1,7 @@
 // EM Fast 4K — Render Web Service
 // API keys belong in Render Environment Variables, never in public HTML.
 // Architecture: detect direct video first; use SaveAPI only when needed.
-// The browser downloads through a secure streaming endpoint; Render does not buffer the whole video in memory.
+// The browser downloads the final direct URL, so Render does NOT proxy the video bytes.
 
 const express = require("express");
 const helmet = require("helmet");
@@ -476,7 +476,7 @@ app.get("/api/health", (_req, res) => {
     maxFileBytes:
       MAX_FILE_BYTES,
     downloadMode:
-      "server-stream"
+      "browser-direct"
   });
 });
 
@@ -520,48 +520,13 @@ app.post("/api/prepare", async (req, res) => {
         });
       }
 
-      // Some video hosts hide Content-Length during the first probe.
-      // Verify the final direct URL once more before returning it.
-      if (direct.size == null) {
-        try {
-          const verified =
-            await fetchWithSafeRedirects(
-              direct.url,
-              { method: "HEAD" }
-            );
-
-          const verifiedSize =
-            parseTotalSize(verified.response);
-
-          await verified.response.body
-            ?.cancel()
-            .catch(() => {});
-
-          if (tooLarge(verifiedSize)) {
-            return res.status(413).json({
-              error:
-                "Maximum file size is 5 GB."
-            });
-          }
-
-          if (Number.isFinite(verifiedSize)) {
-            direct.size = verifiedSize;
-          }
-        } catch {}
-      }
-
-      const title =
-        cleanFileName(
-          titleFromUrl(
-            direct.url
-          )
-        );
-
       return res.json({
         ok: true,
-        directUrl:
-          `/api/download?url=${encodeURIComponent(direct.url)}&name=${encodeURIComponent(title)}`,
-        title,
+        directUrl: `/api/download?url=${encodeURIComponent(direct.url)}&name=${encodeURIComponent(titleFromUrl(direct.url))}`,
+        title:
+          titleFromUrl(
+            direct.url
+          ),
         method: "direct",
         size: direct.size
       });
@@ -629,55 +594,24 @@ app.post("/api/prepare", async (req, res) => {
       });
     }
 
-    const mediaCandidates =
+    const media =
       Array.isArray(data?.medias)
-        ? data.medias.filter(
+        ? data.medias.find(
             item =>
               item &&
               item.type !== "audio" &&
-              typeof item.url === "string" &&
-              /^https?:\/\//i.test(item.url)
+              typeof item.url ===
+                "string" &&
+              /^https?:\/\//i.test(
+                item.url
+              )
           )
-        : [];
-
-    if (!mediaCandidates.length) {
-      return res.status(422).json({
-        error:
-          "SaveAPI could not find a direct video file for this link."
-      });
-    }
-
-    // Pick a real video file, not an empty/thumbnail/HTML URL.
-    let media = null;
-    for (const candidate of mediaCandidates) {
-      try {
-        await assertPublicHttpUrl(candidate.url);
-        const probe = await fetchWithSafeRedirects(
-          candidate.url,
-          {
-            method: "HEAD",
-            headers: {
-              "accept": "video/*,application/octet-stream;q=0.9,*/*;q=0.5"
-            }
-          }
-        );
-        const type = (probe.response.headers.get("content-type") || "").toLowerCase();
-        const size = parseTotalSize(probe.response);
-        await probe.response.body?.cancel().catch(() => {});
-        const looksVideo =
-          type.startsWith("video/") ||
-          /\.(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|3gp|ogv)(?:$|[?#])/i.test(candidate.url);
-        if (probe.response.ok && looksVideo && size !== 0) {
-          media = { ...candidate, url: probe.finalUrl };
-          break;
-        }
-      } catch {}
-    }
+        : null;
 
     if (!media) {
       return res.status(422).json({
         error:
-          "SaveAPI returned no usable video file for this link."
+          "SaveAPI could not find a direct video file for this link."
       });
     }
 
@@ -715,8 +649,7 @@ app.post("/api/prepare", async (req, res) => {
 
     return res.json({
       ok: true,
-      directUrl:
-        `/api/download?url=${encodeURIComponent(media.url)}&name=${encodeURIComponent(title)}`,
+      directUrl: `/api/download?url=${encodeURIComponent(media.url)}&name=${encodeURIComponent(title)}`,
       title,
       method: "saveapi",
       size
@@ -739,13 +672,15 @@ app.post("/api/prepare", async (req, res) => {
 });
 
 // ----------------------------------------------------
-// SECURE VIDEO STREAM / DOWNLOAD
+// DOWNLOAD PROXY
 // ----------------------------------------------------
-// The browser receives a same-origin download URL. Render streams the
-// remote video instead of loading the whole file into memory.
+// The browser must receive the video from the same origin with
+// Content-Disposition: attachment. This prevents mobile browsers
+// from opening a 0:00 video player instead of downloading the file.
+
 app.get("/api/download", async (req, res) => {
-  const inputUrl =
-    String(req.query?.url || "").trim();
+  const inputUrl = String(req.query?.url || "").trim();
+  const requestedName = cleanFileName(String(req.query?.name || "").trim());
 
   if (!inputUrl || inputUrl.length > 12000) {
     return res.status(400).json({
@@ -756,28 +691,40 @@ app.get("/api/download", async (req, res) => {
   try {
     await assertPublicHttpUrl(inputUrl);
 
-    const { response, finalUrl } =
-      await fetchWithSafeRedirects(
-        inputUrl,
-        {
-          method: "GET",
-          headers: {
-            "accept": "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
-            "accept-encoding": "identity"
-          },
-          signal: AbortSignal.timeout(30000)
-        }
-      );
+    const { response, finalUrl } = await fetchWithSafeRedirects(
+      inputUrl,
+      {
+        method: "GET",
+        headers: {
+          "accept": "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
+          "accept-encoding": "identity"
+        },
+        signal: AbortSignal.timeout(30000)
+      }
+    );
 
     if (!response.ok || !response.body) {
       await response.body?.cancel().catch(() => {});
       return res.status(502).json({
-        error:
-          `ভিডিও সার্ভার ডাউনলোড দিতে পারেনি (HTTP ${response.status}).`
+        error: `ভিডিও সার্ভার ডাউনলোড দিতে পারেনি (HTTP ${response.status}).`
       });
     }
 
+    const contentType = (
+      response.headers.get("content-type") || ""
+    ).toLowerCase();
     const contentLength = parseTotalSize(response);
+
+    // Never turn an HTML/error response into a fake .mp4 file.
+    if (
+      contentType.includes("text/html") ||
+      contentType.includes("application/json")
+    ) {
+      await response.body.cancel().catch(() => {});
+      return res.status(502).json({
+        error: "আসল ভিডিও ফাইলটি পাওয়া যায়নি।"
+      });
+    }
 
     if (tooLarge(contentLength)) {
       await response.body.cancel().catch(() => {});
@@ -786,54 +733,32 @@ app.get("/api/download", async (req, res) => {
       });
     }
 
-    const requestedName =
-      cleanFileName(
-        String(req.query?.name || "").trim()
-      );
-
-    const fallbackName =
-      titleFromUrl(finalUrl);
-
     const fileName =
-      cleanFileName(
-        requestedName || fallbackName
-      ) || "EM-Fast-4K-Video";
-
-    const contentType =
-      response.headers.get("content-type") ||
-      "application/octet-stream";
+      requestedName || titleFromUrl(finalUrl) || "EM-Fast-4K-Video";
 
     res.status(200);
     res.setHeader(
       "Content-Type",
-      contentType
+      contentType.startsWith("video/")
+        ? contentType
+        : "application/octet-stream"
     );
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${fileName.replace(/"/g, "")}.mp4"`
     );
-    res.setHeader(
-      "Cache-Control",
-      "no-store"
-    );
-    res.setHeader(
-      "X-Content-Type-Options",
-      "nosniff"
-    );
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
 
     if (Number.isFinite(contentLength)) {
-      res.setHeader(
-        "Content-Length",
-        String(contentLength)
-      );
+      res.setHeader("Content-Length", String(contentLength));
     }
 
     let totalBytes = 0;
 
     try {
       for await (const chunk of response.body) {
-        totalBytes +=
-          chunk.byteLength;
+        totalBytes += chunk.byteLength;
 
         if (totalBytes > MAX_FILE_BYTES) {
           res.destroy();
@@ -841,10 +766,18 @@ app.get("/api/download", async (req, res) => {
         }
 
         if (!res.write(chunk)) {
-          await new Promise(resolve =>
-            res.once("drain", resolve)
-          );
+          await new Promise(resolve => res.once("drain", resolve));
         }
+      }
+
+      if (totalBytes === 0) {
+        if (!res.headersSent) {
+          return res.status(502).json({
+            error: "ভিডিও ফাইলটি খালি বা 0 byte।"
+          });
+        }
+        res.destroy();
+        return;
       }
 
       res.end();
@@ -861,14 +794,9 @@ app.get("/api/download", async (req, res) => {
     const message =
       error?.name === "TimeoutError"
         ? "ভিডিও সার্ভার উত্তর দিতে বেশি সময় নিয়েছে। আবার চেষ্টা করুন।"
-        : (
-          error.message ||
-          "ভিডিও ডাউনলোড করা যায়নি।"
-        );
+        : (error.message || "ভিডিও ডাউনলোড করা যায়নি।");
 
-    return res.status(502).json({
-      error: message
-    });
+    return res.status(502).json({ error: message });
   }
 });
 
