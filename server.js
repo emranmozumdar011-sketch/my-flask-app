@@ -298,44 +298,79 @@ async function readFirstChunk(body, maxBytes = 64 * 1024) {
   return { reader, first: received };
 }
 
-function looksLikeMediaBytes(bytes) {
-  if (!bytes || !bytes.byteLength) return false;
+function mediaSignature(bytes) {
+  if (!bytes || bytes.byteLength < 4) return null;
 
-  const max = Math.min(bytes.byteLength, 64 * 1024);
-  const text = Buffer.from(bytes.slice(0, max)).toString("latin1").toLowerCase();
+  const b = bytes;
+  const text = Buffer.from(b.slice(0, Math.min(b.byteLength, 64 * 1024))).toString("latin1");
+  const lower = text.toLowerCase();
 
-  // MP4 / MOV / M4V normally contain an ftyp box near the beginning.
-  if (text.includes("ftyp")) return true;
+  // ISO Base Media / MP4 / MOV / M4V / 3GP: an ftyp box is normally near the start.
+  if (lower.includes("ftyp")) return "mp4";
 
-  // WebM / Matroska EBML signature.
-  if (
-    bytes.byteLength >= 4 &&
-    bytes[0] === 0x1a &&
-    bytes[1] === 0x45 &&
-    bytes[2] === 0xdf &&
-    bytes[3] === 0xa3
-  ) return true;
-
-  // MPEG-TS / MPEG audio-ish binary streams: reject obvious HTML/JSON only.
-  const trimmed = text.trimStart();
-  if (
-    trimmed.startsWith("<!doctype") ||
-    trimmed.startsWith("<html") ||
-    trimmed.startsWith("{\"") ||
-    trimmed.startsWith("{'")
-  ) {
-    return false;
+  // WebM / Matroska (EBML).
+  if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) {
+    return "webm";
   }
 
-  // If it is binary and not an obvious text error, allow octet-stream.
-  let printable = 0;
-  for (let i = 0; i < Math.min(bytes.length, 1024); i++) {
-    const c = bytes[i];
-    if (c === 9 || c === 10 || c === 13 || (c >= 32 && c <= 126)) printable++;
+  // Flash Video.
+  if (b.byteLength >= 3 && b[0] === 0x46 && b[1] === 0x4c && b[2] === 0x56) {
+    return "flv";
   }
 
-  return printable < Math.min(bytes.length, 1024) * 0.90;
+  // AVI: RIFF....AVI .
+  if (
+    b.byteLength >= 12 &&
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x41 && b[9] === 0x56 && b[10] === 0x49 && b[11] === 0x20
+  ) return "avi";
+
+  // OGG containers (often .ogv for video).
+  if (b.byteLength >= 4 && b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) {
+    return "ogv";
+  }
+
+  // MPEG-TS: sync byte at the beginning and again at the 188-byte boundary.
+  if (b.byteLength >= 376 && b[0] === 0x47 && b[188] === 0x47) {
+    return "ts";
+  }
+
+  // MPEG program stream.
+  if (b.byteLength >= 4 && b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x01 && b[3] === 0xba) {
+    return "mpeg";
+  }
+
+  return null;
 }
+
+function looksLikeMediaBytes(bytes) {
+  return Boolean(mediaSignature(bytes));
+}
+
+function isClearlyNonVideoContentType(type) {
+  const t = String(type || "").toLowerCase().split(";", 1)[0].trim();
+  return (
+    t.startsWith("image/") ||
+    t.startsWith("audio/") ||
+    t === "text/html" ||
+    t === "text/plain" ||
+    t === "application/json" ||
+    t === "application/xml" ||
+    t === "text/xml"
+  );
+}
+
+function extensionForMedia(contentType, finalUrl, signature) {
+  const type = String(contentType || "").toLowerCase();
+  if (signature === "webm" || type.includes("webm") || /\.webm(?:$|[?#])/i.test(finalUrl)) return "webm";
+  if (signature === "avi" || type.includes("x-msvideo") || /\.avi(?:$|[?#])/i.test(finalUrl)) return "avi";
+  if (signature === "flv" || type.includes("x-flv") || /\.flv(?:$|[?#])/i.test(finalUrl)) return "flv";
+  if (signature === "ogv" || type.includes("ogg") || /\.ogv(?:$|[?#])/i.test(finalUrl)) return "ogv";
+  if (signature === "ts" || type.includes("mp2t") || /\.(?:ts|m2ts)(?:$|[?#])/i.test(finalUrl)) return "ts";
+  if (signature === "mpeg" || type.includes("mpeg") || /\.(?:mpeg|mpg)(?:$|[?#])/i.test(finalUrl)) return "mpg";
+  return "mp4";
+}
+
 
 
 // Probe a URL without downloading the whole file.
@@ -844,25 +879,40 @@ app.get("/api/download", async (req, res) => {
       });
     }
 
-    const typeLooksVideo =
-      upstreamType.startsWith("video/") ||
-      upstreamType.includes("mp4") ||
-      upstreamType.includes("quicktime") ||
-      upstreamType.includes("webm");
+    const cleanType = upstreamType.split(";", 1)[0].trim();
+    const signature = mediaSignature(firstBytes);
+    const typeLooksVideo = cleanType.startsWith("video/") ||
+      cleanType.includes("mp4") ||
+      cleanType.includes("quicktime") ||
+      cleanType.includes("webm") ||
+      cleanType.includes("x-matroska") ||
+      cleanType.includes("x-msvideo") ||
+      cleanType.includes("x-flv") ||
+      cleanType.includes("ogg") ||
+      cleanType.includes("mpeg");
 
-    const bytesLookMedia = looksLikeMediaBytes(firstBytes);
-
-    const obviouslyText =
-      /^(<!doctype|<html|\{\s*["']?(error|message|success)|access denied|forbidden)/i.test(
-        Buffer.from(firstBytes.slice(0, 4096)).toString("utf8").trim()
-      );
-
-    if (obviouslyText || (!typeLooksVideo && !bytesLookMedia)) {
+    // Never turn an image/audio/HTML/JSON response into an .mp4 file.
+    // This is the important protection against the black/0-byte downloads.
+    if (isClearlyNonVideoContentType(cleanType)) {
       try { await upstreamReader.cancel(); } catch {}
-
       return res.status(502).json({
-        error:
-          "The video server returned an invalid file instead of video. Please try again."
+        error: "The source returned an image, audio file, or webpage instead of a video. No video download was created."
+      });
+    }
+
+    // If the server says video/*, accept it only when it is not obviously an error.
+    // For generic application/octet-stream, a real video signature is REQUIRED.
+    const genericBinary = !cleanType ||
+      cleanType === "application/octet-stream" ||
+      cleanType === "binary/octet-stream";
+
+    const obviouslyText = /^(<!doctype|<html|\{\s*["']?(error|message|success)|access denied|forbidden)/i
+      .test(Buffer.from(firstBytes.slice(0, 4096)).toString("utf8").trim());
+
+    if (obviouslyText || (genericBinary && !signature) || (!typeLooksVideo && !signature)) {
+      try { await upstreamReader.cancel(); } catch {}
+      return res.status(502).json({
+        error: "The source did not return a valid video file. No download was created."
       });
     }
 
@@ -876,26 +926,28 @@ app.get("/api/download", async (req, res) => {
       cleanFileName(requestedName || fallbackName) ||
       "EM-Fast-4K-Video";
 
-    // Preserve the real media type where possible.
-    let contentType = upstreamType;
+    // Preserve the real media type and extension. Never blindly label an
+    // unknown binary response as MP4.
+    const extension = extensionForMedia(upstreamType, finalUrl, signature);
+    let contentType = cleanType;
 
     if (!contentType ||
         contentType === "application/octet-stream" ||
         contentType === "binary/octet-stream") {
-      if (/webm|matroska/i.test(upstreamType) || /\.webm$/i.test(finalUrl)) {
-        contentType = "video/webm";
-      } else {
-        contentType = "video/mp4";
-      }
+      const byExt = {
+        mp4: "video/mp4", webm: "video/webm", avi: "video/x-msvideo",
+        flv: "video/x-flv", ogv: "video/ogg", ts: "video/mp2t", mpg: "video/mpeg"
+      };
+      contentType = byExt[extension] || "video/mp4";
     }
 
     // Do NOT send upstream Content-Length.
-    // A stale/mismatched Content-Length is a common cause of broken 0:00 files.
+    // A stale/mismatched Content-Length can produce broken/0:00 files.
     res.status(200);
     res.setHeader("Content-Type", contentType);
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${fileName.replace(/"/g, "")}.mp4"`
+      `attachment; filename="${fileName.replace(/"/g, "")}.${extension}"`
     );
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
