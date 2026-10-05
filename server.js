@@ -1,7 +1,7 @@
 // EM Fast 4K — Render Web Service
 // API keys belong in Render Environment Variables, never in public HTML.
 // Architecture: detect direct video first; use SaveAPI only when needed.
-// The browser downloads the final direct URL, so Render does NOT proxy the video bytes.
+// The browser downloads through a secure streaming endpoint; Render does not buffer the whole video in memory.
 
 const express = require("express");
 const helmet = require("helmet");
@@ -128,7 +128,7 @@ function isPrivateIPv6(ip) {
     value.startsWith("fd") ||
     value.startsWith("fe80:") ||
     value.startsWith("ff") ||
-        value.startsWith("::ffff:127.") ||
+    value.startsWith("::ffff:127.") ||
     value.startsWith("::ffff:10.") ||
     value.startsWith("::ffff:192.168.")
   );
@@ -258,7 +258,7 @@ async function fetchWithSafeRedirects(
       ).toString();
 
       continue;
-          }
+    }
 
     return {
       response,
@@ -387,7 +387,8 @@ async function probeDirectVideo(url) {
 
     const size =
       parseTotalSize(response);
-        const type =
+
+    const type =
       response.headers.get(
         "content-type"
       ) || "video/mp4";
@@ -475,7 +476,7 @@ app.get("/api/health", (_req, res) => {
     maxFileBytes:
       MAX_FILE_BYTES,
     downloadMode:
-      "browser-direct"
+      "server-stream"
   });
 });
 
@@ -517,7 +518,7 @@ app.post("/api/prepare", async (req, res) => {
           error:
             "Maximum file size is 5 GB."
         });
-              }
+      }
 
       // Some video hosts hide Content-Length during the first probe.
       // Verify the final direct URL once more before returning it.
@@ -549,13 +550,18 @@ app.post("/api/prepare", async (req, res) => {
         } catch {}
       }
 
-      return res.json({
-        ok: true,
-        directUrl: direct.url,
-        title:
+      const title =
+        cleanFileName(
           titleFromUrl(
             direct.url
-          ),
+          )
+        );
+
+      return res.json({
+        ok: true,
+        directUrl:
+          `/api/download?url=${encodeURIComponent(direct.url)}&name=${encodeURIComponent(title)}`,
+        title,
         method: "direct",
         size: direct.size
       });
@@ -647,7 +653,7 @@ app.post("/api/prepare", async (req, res) => {
     await assertPublicHttpUrl(
       media.url
     );
-    
+
     // Prefer API-provided size.
     let size = Number(
       media.size ||
@@ -678,7 +684,8 @@ app.post("/api/prepare", async (req, res) => {
 
     return res.json({
       ok: true,
-      directUrl: media.url,
+      directUrl:
+        `/api/download?url=${encodeURIComponent(media.url)}&name=${encodeURIComponent(title)}`,
       title,
       method: "saveapi",
       size
@@ -695,6 +702,140 @@ app.post("/api/prepare", async (req, res) => {
         );
 
     return res.status(400).json({
+      error: message
+    });
+  }
+});
+
+// ----------------------------------------------------
+// SECURE VIDEO STREAM / DOWNLOAD
+// ----------------------------------------------------
+// The browser receives a same-origin download URL. Render streams the
+// remote video instead of loading the whole file into memory.
+app.get("/api/download", async (req, res) => {
+  const inputUrl =
+    String(req.query?.url || "").trim();
+
+  if (!inputUrl || inputUrl.length > 12000) {
+    return res.status(400).json({
+      error: "ডাউনলোড লিংকটি সঠিক নয়।"
+    });
+  }
+
+  try {
+    await assertPublicHttpUrl(inputUrl);
+
+    const { response, finalUrl } =
+      await fetchWithSafeRedirects(
+        inputUrl,
+        {
+          method: "GET",
+          headers: {
+            "accept": "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
+            "accept-encoding": "identity"
+          },
+          signal: AbortSignal.timeout(30000)
+        }
+      );
+
+    if (!response.ok || !response.body) {
+      await response.body?.cancel().catch(() => {});
+      return res.status(502).json({
+        error:
+          `ভিডিও সার্ভার ডাউনলোড দিতে পারেনি (HTTP ${response.status}).`
+      });
+    }
+
+    const contentLength = parseTotalSize(response);
+
+    if (tooLarge(contentLength)) {
+      await response.body.cancel().catch(() => {});
+      return res.status(413).json({
+        error: "Maximum file size is 5 GB."
+      });
+    }
+
+    const requestedName =
+      cleanFileName(
+        String(req.query?.name || "").trim()
+      );
+
+    const fallbackName =
+      titleFromUrl(finalUrl);
+
+    const fileName =
+      cleanFileName(
+        requestedName || fallbackName
+      ) || "EM-Fast-4K-Video";
+
+    const contentType =
+      response.headers.get("content-type") ||
+      "application/octet-stream";
+
+    res.status(200);
+    res.setHeader(
+      "Content-Type",
+      contentType
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName.replace(/"/g, "")}.mp4"`
+    );
+    res.setHeader(
+      "Cache-Control",
+      "no-store"
+    );
+    res.setHeader(
+      "X-Content-Type-Options",
+      "nosniff"
+    );
+
+    if (Number.isFinite(contentLength)) {
+      res.setHeader(
+        "Content-Length",
+        String(contentLength)
+      );
+    }
+
+    let totalBytes = 0;
+
+    try {
+      for await (const chunk of response.body) {
+        totalBytes +=
+          chunk.byteLength;
+
+        if (totalBytes > MAX_FILE_BYTES) {
+          res.destroy();
+          return;
+        }
+
+        if (!res.write(chunk)) {
+          await new Promise(resolve =>
+            res.once("drain", resolve)
+          );
+        }
+      }
+
+      res.end();
+    } catch (streamError) {
+      if (!res.destroyed) {
+        res.destroy(streamError);
+      }
+    }
+  } catch (error) {
+    if (res.headersSent) {
+      return res.destroy(error);
+    }
+
+    const message =
+      error?.name === "TimeoutError"
+        ? "ভিডিও সার্ভার উত্তর দিতে বেশি সময় নিয়েছে। আবার চেষ্টা করুন।"
+        : (
+          error.message ||
+          "ভিডিও ডাউনলোড করা যায়নি।"
+        );
+
+    return res.status(502).json({
       error: message
     });
   }
@@ -770,4 +911,3 @@ app.listen(PORT, () => {
     );
   }
 });
-    

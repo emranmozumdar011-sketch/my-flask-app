@@ -424,17 +424,23 @@ async function downloadActual(){
     btn.textContent="DOWNLOADING…";
     progress(90);
 
-    // The video bytes are NOT routed through Render.
-    // The browser downloads the final direct/original URL itself.
+    // Start the browser download without routing large video bytes through Render.
+    // Cross-origin hosts may ignore the HTML download attribute; in that case
+    // the direct URL is opened as a download attempt instead of silently
+    // marking the job as 100%.
+    const fileName=((d.title||"EM-Fast-4K-Video").replace(/[\\/:*?"<>|]+/g,"_").trim()||"EM-Fast-4K-Video")+".mp4";
     const a=document.createElement("a");
     a.href=d.directUrl;
-    a.download=(d.title||"EM-Fast-4K-Video")+".mp4";
+    a.download=fileName;
     a.rel="noopener";
-    a.target="_blank";
+    a.style.display="none";
     document.body.append(a);
     a.click();
     a.remove();
+
     progress(100);
+    title.textContent="DOWNLOAD STARTED";
+    errorBox.textContent="";
 
     setTimeout(()=>{
       input.value="";
