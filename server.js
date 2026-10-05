@@ -99,7 +99,7 @@ async function assertPublicHttpUrl(input) {
     throw new Error("Only normal HTTP/HTTPS links are supported.");
   }
 
-  const host = u.hostname.toLowerCase().replace(/^\\[|\\]$/g, "");
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
 
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
     throw new Error("This address cannot be used.");
@@ -222,7 +222,7 @@ function titleFromUrl(value) {
     );
 
     return cleanFileName(
-      last.replace(/\\.[a-z0-9]{2,5}$/i, "") || u.hostname
+      last.replace(/\.[a-z0-9]{2,5}$/i, "") || u.hostname
     );
   } catch {
     return "EM-Fast-4K-Video";
@@ -231,7 +231,7 @@ function titleFromUrl(value) {
 
 function isYouTubeUrl(input) {
   try {
-    const host = new URL(input).hostname.toLowerCase().replace(/^www\\./, "");
+    const host = new URL(input).hostname.toLowerCase().replace(/^www\./, "");
     return host === "youtube.com" ||
       host.endsWith(".youtube.com") ||
       host === "youtu.be";
@@ -241,7 +241,7 @@ function isYouTubeUrl(input) {
 }
 
 function numberFromQuality(value) {
-  const m = String(value || "").match(/(\\d{3,4})p/i);
+  const m = String(value || "").match(/(\d{3,4})p/i);
   return m ? Number(m[1]) : 0;
 }
 
@@ -853,7 +853,7 @@ app.get("/api/download", async (req, res) => {
     const bytesLookMedia = looksLikeMediaBytes(firstBytes);
 
     const obviouslyText =
-      /^(<!doctype|<html|\\{\\s*["']?(error|message|success)|access denied|forbidden)/i.test(
+      /^(<!doctype|<html|\{\s*["']?(error|message|success)|access denied|forbidden)/i.test(
         Buffer.from(firstBytes.slice(0, 4096)).toString("utf8").trim()
       );
 
