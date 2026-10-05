@@ -772,7 +772,7 @@ app.get("/api/download", async (req, res) => {
 
     return res.status(502).json({ error: message });
   }
-}););
+});
 
 // ----------------------------------------------------
 // EXPRESS 5 SPA FALLBACK
