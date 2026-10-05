@@ -644,14 +644,6 @@ app.get("/api/download", async (req, res) => {
       });
     }
 
-    if (Number.isFinite(contentLength) && contentLength <= 0) {
-      await response.body.cancel().catch(() => {});
-      console.error(`[DOWNLOAD ${requestId}] ZERO_BYTES content-length=${contentLength}`);
-      return res.status(502).json({
-        error: "Download failed: the source server returned a 0-byte file."
-      });
-    }
-
     if (tooLarge(contentLength)) {
       await response.body.cancel().catch(() => {});
       return res.status(413).json({ error: "Maximum file size is 5 GB." });
@@ -678,6 +670,13 @@ app.get("/api/download", async (req, res) => {
       `hex=${bytesToHex(firstBytes)} mp4=${diagnosis.hasMp4} webm=${diagnosis.hasWebm} ` +
       `image=${diagnosis.looksImage} text=${diagnosis.looksText}`
     );
+
+    if (contentLength === 0 && firstBytes.byteLength > 0) {
+      console.log(
+        `[DOWNLOAD ${requestId}] NOTE upstream reported Content-Length=0 ` +
+        `but sent real bytes; ignoring the incorrect zero length.`
+      );
+    }
 
     if (diagnosis.looksImage) {
       await reader.cancel().catch(() => {});
@@ -713,7 +712,7 @@ app.get("/api/download", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${headerFileName}.mp4"`);
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    if (Number.isFinite(contentLength)) {
+    if (Number.isFinite(contentLength) && contentLength > 0) {
       res.setHeader("Content-Length", String(contentLength));
     }
 
