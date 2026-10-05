@@ -700,12 +700,22 @@ app.get("/api/download", async (req, res) => {
 
     // IMPORTANT: Node rejects some Unicode characters in HTTP header values.
     // Use ASCII only in Content-Disposition so a valid video cannot become 0 B.
-    const headerFileName = fileName
+    const safeBaseName = fileName
       .normalize("NFKD")
       .replace(/[^A-Za-z0-9._ -]/g, "_")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 100) || "EM-Fast-4K-Video";
+      .slice(0, 70) || "EM-Fast-4K-Video";
+
+// Always use a fresh filename for each download.
+// This prevents Android/Chrome from showing "Download file again?"
+// when a previous video with the same name already exists.
+const uniqueStamp = new Date().toISOString()
+      .replace(/[-:TZ.]/g, "")
+      .slice(0, 14);
+
+const randomPart = Math.random().toString(36).slice(2, 6);
+const headerFileName = `${safeBaseName}_${uniqueStamp}_${randomPart}`;
 
     res.status(200);
     res.setHeader("Content-Type", contentType || "video/mp4");
