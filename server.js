@@ -551,13 +551,68 @@ app.post("/api/prepare", async (req, res) => {
 });
 
 // ----------------------------------------------------
+// DOWNLOAD DIAGNOSTICS
+// ----------------------------------------------------
+
+function bytesToHex(bytes, max = 24) {
+  return Buffer.from(bytes.subarray(0, max)).toString("hex");
+}
+
+function bytesToAscii(bytes, max = 80) {
+  return Buffer.from(bytes.subarray(0, max))
+    .toString("utf8")
+    .replace(/[^\x20-\x7E]/g, ".");
+}
+
+function diagnoseFirstChunk(bytes, contentType) {
+  const lowerType = String(contentType || "").toLowerCase();
+  const text = bytesToAscii(bytes).toLowerCase();
+  const looksText =
+    lowerType.includes("text/html") ||
+    lowerType.includes("application/json") ||
+    text.startsWith("<!doctype") ||
+    text.startsWith("<html") ||
+    text.startsWith("{") ||
+    text.startsWith("[");
+  const looksImage =
+    lowerType.startsWith("image/") ||
+    (bytes.length >= 4 && (
+      (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) ||
+      (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) ||
+      (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46)
+    ));
+  const hasMp4 =
+    bytes.length >= 8 &&
+    Buffer.from(bytes).subarray(4, Math.min(bytes.length, 64)).includes(Buffer.from("ftyp"));
+  const hasWebm =
+    bytes.length >= 4 &&
+    bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+  return { looksText, looksImage, hasMp4, hasWebm };
+}
+
+// ----------------------------------------------------
 // SECURE VIDEO STREAM / DOWNLOAD
 // ----------------------------------------------------
 
 app.get("/api/download", async (req, res) => {
   const inputUrl = String(req.query?.url || "").trim();
+  const requestId = Math.random().toString(36).slice(2, 9);
+
+  const host = (() => {
+    try { return new URL(inputUrl).hostname; } catch { return "invalid"; }
+  })();
+
+  console.log(`[DOWNLOAD ${requestId}] START url-host=${host}`);
+
+  res.on("finish", () => {
+    console.log(`[DOWNLOAD ${requestId}] RESPONSE FINISH status=${res.statusCode}`);
+  });
+  res.on("close", () => {
+    console.log(`[DOWNLOAD ${requestId}] RESPONSE CLOSE headersSent=${res.headersSent} writableEnded=${res.writableEnded}`);
+  });
 
   if (!inputUrl || inputUrl.length > 16000) {
+    console.error(`[DOWNLOAD ${requestId}] ERROR invalid download URL`);
     return res.status(400).json({ error: "The download link is not valid." });
   }
 
@@ -573,18 +628,28 @@ app.get("/api/download", async (req, res) => {
       signal: AbortSignal.timeout(120000)
     });
 
+    const contentType = response.headers.get("content-type") || "";
+    const contentLength = parseTotalSize(response);
+
+    console.log(
+      `[DOWNLOAD ${requestId}] UPSTREAM status=${response.status} ` +
+      `type=${contentType || "none"} length=${Number.isFinite(contentLength) ? contentLength : "unknown"}`
+    );
+
     if (!response.ok || !response.body) {
       await response.body?.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] ERROR upstream HTTP=${response.status}`);
       return res.status(502).json({
         error: `The video server could not provide the download (HTTP ${response.status}).`
       });
     }
 
-    const contentLength = parseTotalSize(response);
-
     if (Number.isFinite(contentLength) && contentLength <= 0) {
       await response.body.cancel().catch(() => {});
-      return res.status(502).json({ error: "The video server returned a 0-byte file. Please try again." });
+      console.error(`[DOWNLOAD ${requestId}] ZERO_BYTES content-length=${contentLength}`);
+      return res.status(502).json({
+        error: "Download failed: the source server returned a 0-byte file."
+      });
     }
 
     if (tooLarge(contentLength)) {
@@ -592,48 +657,113 @@ app.get("/api/download", async (req, res) => {
       return res.status(413).json({ error: "Maximum file size is 5 GB." });
     }
 
+    // Read one real chunk first. Nothing is sent to the phone until
+    // this check passes, so images/error pages cannot become fake MP4s.
+    const reader = response.body.getReader();
+    const first = await reader.read();
+
+    if (first.done || !first.value || first.value.byteLength === 0) {
+      await reader.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] ZERO_BYTES_STREAM`);
+      return res.status(502).json({
+        error: "Download failed: the source returned 0 bytes. No video data was received."
+      });
+    }
+
+    const firstBytes = first.value;
+    const diagnosis = diagnoseFirstChunk(firstBytes, contentType);
+
+    console.log(
+      `[DOWNLOAD ${requestId}] FIRST_CHUNK bytes=${firstBytes.byteLength} ` +
+      `hex=${bytesToHex(firstBytes)} mp4=${diagnosis.hasMp4} webm=${diagnosis.hasWebm} ` +
+      `image=${diagnosis.looksImage} text=${diagnosis.looksText}`
+    );
+
+    if (diagnosis.looksImage) {
+      await reader.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] WRONG_FILE image-response`);
+      return res.status(502).json({
+        error: "Download failed: the source returned an image instead of a video."
+      });
+    }
+
+    if (diagnosis.looksText) {
+      await reader.cancel().catch(() => {});
+      console.error(`[DOWNLOAD ${requestId}] WRONG_FILE text-error-response`);
+      return res.status(502).json({
+        error: "Download failed: the source returned an error page instead of video data."
+      });
+    }
+
     const requestedName = cleanFileName(String(req.query?.name || "").trim());
     const fallbackName = titleFromUrl(finalUrl);
     const fileName = cleanFileName(requestedName || fallbackName) || "EM-Fast-4K-Video";
-    const contentType = response.headers.get("content-type") || "video/mp4";
+
+    // IMPORTANT: Node rejects some Unicode characters in HTTP header values.
+    // Use ASCII only in Content-Disposition so a valid video cannot become 0 B.
+    const headerFileName = fileName
+      .normalize("NFKD")
+      .replace(/[^A-Za-z0-9._ -]/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 100) || "EM-Fast-4K-Video";
 
     res.status(200);
-    res.setHeader("Content-Type", contentType);
-    // Use an ASCII-safe filename in the HTTP header.
-// The video title can contain Unicode, but Node rejects some Unicode/control
-// characters inside Content-Disposition and then the download becomes 0 bytes.
-const headerFileName = (fileName || "EM-Fast-4K-Video")
-  .normalize("NFKD")
-  .replace(/[^A-Za-z0-9._ -]/g, "_")
-  .replace(/\s+/g, " ")
-  .trim()
-  .slice(0, 100) || "EM-Fast-4K-Video";
-
-res.setHeader("Content-Disposition", `attachment; filename="${headerFileName}.mp4"`);
+    res.setHeader("Content-Type", contentType || "video/mp4");
+    res.setHeader("Content-Disposition", `attachment; filename="${headerFileName}.mp4"`);
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    if (Number.isFinite(contentLength)) res.setHeader("Content-Length", String(contentLength));
+    if (Number.isFinite(contentLength)) {
+      res.setHeader("Content-Length", String(contentLength));
+    }
 
     let totalBytes = 0;
 
     try {
-      for await (const chunk of response.body) {
-        totalBytes += chunk.byteLength;
+      totalBytes = firstBytes.byteLength;
+      if (!res.write(firstBytes)) {
+        await new Promise(resolve => res.once("drain", resolve));
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.byteLength === 0) continue;
+
+        totalBytes += value.byteLength;
+
         if (totalBytes > MAX_FILE_BYTES) {
+          await reader.cancel().catch(() => {});
+          console.error(`[DOWNLOAD ${requestId}] ERROR exceeded 5GB bytes=${totalBytes}`);
           res.destroy();
           return;
         }
-        if (!res.write(chunk)) await new Promise(resolve => res.once("drain", resolve));
+
+        if (!res.write(value)) {
+          await new Promise(resolve => res.once("drain", resolve));
+        }
       }
+
+      if (totalBytes <= 0) {
+        console.error(`[DOWNLOAD ${requestId}] ZERO_BYTES_AFTER_STREAM`);
+        res.destroy();
+        return;
+      }
+
+      console.log(`[DOWNLOAD ${requestId}] SUCCESS total-bytes=${totalBytes}`);
       res.end();
     } catch (streamError) {
+      console.error(
+        `[DOWNLOAD ${requestId}] STREAM_ERROR name=${streamError?.name || "Error"} ` +
+        `message=${streamError?.message || streamError} bytes=${totalBytes}`
+      );
       if (!res.destroyed) res.destroy(streamError);
     }
   } catch (error) {
-    if (String(error?.message || "").includes("Invalid character in header content")) {
-      console.error(`[DOWNLOAD ${requestId}] HEADER_ERROR: unsafe filename/header characters were rejected.`);
-    }
-
+    console.error(
+      `[DOWNLOAD ${requestId}] REQUEST_ERROR name=${error?.name || "Error"} ` +
+      `message=${error?.message || error}`
+    );
     if (res.headersSent) return res.destroy(error);
 
     const message = error?.name === "TimeoutError"
@@ -642,7 +772,7 @@ res.setHeader("Content-Disposition", `attachment; filename="${headerFileName}.mp
 
     return res.status(502).json({ error: message });
   }
-});
+}););
 
 // ----------------------------------------------------
 // EXPRESS 5 SPA FALLBACK

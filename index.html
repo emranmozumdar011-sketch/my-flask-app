@@ -407,43 +407,38 @@ async function downloadActual(){
 
     let d={};
     try{d=await r.json()}catch{}
+
     if(!r.ok||!d.ok||!d.directUrl){
       throw new Error(d.error||`Unable to prepare the download (HTTP ${r.status})`);
     }
 
-    const size=Number(d.size);
-    if(Number.isFinite(size)&&size>5*1024*1024*1024){
+    if(Number.isFinite(Number(d.size)) && Number(d.size)>5*1024*1024*1024){
       throw new Error("Maximum file size is 5 GB.");
     }
 
-    progress(60);
-
-    // Save history only after the server has successfully prepared a real media URL.
+    progress(70);
     historySave(url,d.title||"EM_Video",d.method||"direct");
 
-    title.textContent="DOWNLOAD STARTING…";
+    title.textContent="DOWNLOADING…";
     title.style.background="none";
     title.style.webkitTextFillColor="#00ff88";
     title.style.filter="drop-shadow(0 0 10px #00ff88b3)";
     videos.classList.add("active-smoke");
-    btn.textContent="STARTING…";
-    progress(85);
+    btn.textContent="DOWNLOADING…";
 
-    /*
-      IMPORTANT:
-      - Social/CDN videos are handed directly to the browser. Render does NOT
-        proxy their large video bytes, so a broken Render stream cannot turn
-        into a 0:00 file.
-      - YouTube uses /api/download because SaveAPI's YouTube signed stream is
-        tied to the server-side request and must be streamed through Render.
-    */
-    // Use a real same-origin navigation for Android/Chrome download handling.
-    // This is more reliable than a hidden anchor click for large files.
-    title.textContent="DOWNLOAD STARTING…";
+    // 90% means "download request has been started".
+    // Do NOT show 100% here: the browser controls the real file transfer.
     progress(90);
-    errorBox.textContent="";
 
+    // Use a normal same-origin navigation so Android handles the
+    // Content-Disposition attachment as a real download.
     window.location.href=d.directUrl;
+
+    // Do not leave the app stuck at 90% when the user returns.
+    // The actual download is handled outside this page.
+    setTimeout(()=>{
+      resetDownloadUi();
+    },1800);
 
   }catch(e){
     errorBox.textContent="⚠️ "+(e.message||"Unable to process the video link");
@@ -459,6 +454,32 @@ async function downloadActual(){
     btn.textContent="DOWNLOAD";
   }
 }
+
+function resetDownloadUi(){
+  input.value="";
+  busy=false;
+  btn.disabled=false;
+  btn.textContent="DOWNLOAD";
+  progress(0);
+  title.textContent="EM Fast 4K";
+  title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
+  title.style.webkitBackgroundClip="text";
+  title.style.webkitTextFillColor="transparent";
+  title.style.filter="none";
+  videos.classList.remove("active-smoke");
+}
+
+// Android/Chrome can restore this page from back-forward cache.
+// Always clear the old 90% state when the page becomes visible again.
+window.addEventListener("pageshow",()=>{
+  if(!busy) resetDownloadUi();
+});
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible" && busy) {
+    setTimeout(()=>resetDownloadUi(),250);
+  }
+});
+
 videos.onclick=()=>{renderHistory();modal.style.display="flex"};videos.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();renderHistory();modal.style.display="flex"}};$("closeModal").onclick=()=>modal.style.display="none";input.onkeydown=e=>{if(e.key==="Enter")startDownload()};renderHistory();
 </script>
 <style id="download-button-click-fix">
