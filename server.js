@@ -128,7 +128,7 @@ function isPrivateIPv6(ip) {
     value.startsWith("fd") ||
     value.startsWith("fe80:") ||
     value.startsWith("ff") ||
-    value.startsWith("::ffff:127.") ||
+        value.startsWith("::ffff:127.") ||
     value.startsWith("::ffff:10.") ||
     value.startsWith("::ffff:192.168.")
   );
@@ -258,7 +258,7 @@ async function fetchWithSafeRedirects(
       ).toString();
 
       continue;
-    }
+          }
 
     return {
       response,
@@ -387,8 +387,7 @@ async function probeDirectVideo(url) {
 
     const size =
       parseTotalSize(response);
-
-    const type =
+        const type =
       response.headers.get(
         "content-type"
       ) || "video/mp4";
@@ -518,6 +517,36 @@ app.post("/api/prepare", async (req, res) => {
           error:
             "Maximum file size is 5 GB."
         });
+              }
+
+      // Some video hosts hide Content-Length during the first probe.
+      // Verify the final direct URL once more before returning it.
+      if (direct.size == null) {
+        try {
+          const verified =
+            await fetchWithSafeRedirects(
+              direct.url,
+              { method: "HEAD" }
+            );
+
+          const verifiedSize =
+            parseTotalSize(verified.response);
+
+          await verified.response.body
+            ?.cancel()
+            .catch(() => {});
+
+          if (tooLarge(verifiedSize)) {
+            return res.status(413).json({
+              error:
+                "Maximum file size is 5 GB."
+            });
+          }
+
+          if (Number.isFinite(verifiedSize)) {
+            direct.size = verifiedSize;
+          }
+        } catch {}
       }
 
       return res.json({
@@ -618,7 +647,7 @@ app.post("/api/prepare", async (req, res) => {
     await assertPublicHttpUrl(
       media.url
     );
-
+    
     // Prefer API-provided size.
     let size = Number(
       media.size ||
@@ -741,3 +770,4 @@ app.listen(PORT, () => {
     );
   }
 });
+    
