@@ -337,6 +337,89 @@ function looksLikeMediaBytes(bytes) {
   return printable < Math.min(bytes.length, 1024) * 0.90;
 }
 
+
+// Probe a URL without downloading the whole file.
+// A direct URL is considered usable only when it clearly looks like a video.
+// Some CDNs do not expose Content-Type correctly, so a Range request is also
+// accepted when the response has a video extension or a media signature.
+async function probeDirectVideo(inputUrl) {
+  try {
+    const head = await fetchWithSafeRedirects(inputUrl, {
+      method: "HEAD",
+      headers: {
+        accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5"
+      },
+      signal: AbortSignal.timeout(15000)
+    });
+
+    const headResponse = head.response;
+    const headSize = parseTotalSize(headResponse);
+    const headType = (headResponse.headers.get("content-type") || "").toLowerCase();
+    const headLooksVideo =
+      headResponse.ok &&
+      (
+        headType.startsWith("video/") ||
+        headType.includes("mp4") ||
+        headType.includes("quicktime") ||
+        headType.includes("webm") ||
+        VIDEO_EXT.test(head.finalUrl)
+      );
+
+    await headResponse.body?.cancel().catch(() => {});
+
+    if (headLooksVideo) {
+      return {
+        direct: true,
+        url: head.finalUrl,
+        size: headSize
+      };
+    }
+  } catch (_) {
+    // HEAD is not supported by many video/CDN servers. Try a small GET below.
+  }
+
+  try {
+    const got = await fetchWithSafeRedirects(inputUrl, {
+      method: "GET",
+      headers: {
+        Range: "bytes=0-65535",
+        accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
+        "accept-encoding": "identity"
+      },
+      signal: AbortSignal.timeout(15000)
+    });
+
+    const response = got.response;
+    const type = (response.headers.get("content-type") || "").toLowerCase();
+    const size = parseTotalSize(response);
+
+    if (!response.ok || !response.body) {
+      await response.body?.cancel().catch(() => {});
+      return { direct: false };
+    }
+
+    const { reader, first } = await readFirstChunk(response.body, 65536);
+
+    const media =
+      type.startsWith("video/") ||
+      type.includes("mp4") ||
+      type.includes("quicktime") ||
+      type.includes("webm") ||
+      VIDEO_EXT.test(got.finalUrl) ||
+      looksLikeMediaBytes(first);
+
+    try { await reader.cancel(); } catch {}
+
+    return {
+      direct: Boolean(media),
+      url: got.finalUrl,
+      size
+    };
+  } catch (_) {
+    return { direct: false };
+  }
+}
+
 // ---------------- SAVEAPI ----------------
 
 function saveApiErrorMessage(response, data) {

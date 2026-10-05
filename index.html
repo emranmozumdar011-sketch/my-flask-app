@@ -410,29 +410,41 @@ async function downloadActual(){
     if(!r.ok||!d.ok||!d.directUrl){
       throw new Error(d.error||`Unable to prepare the download (HTTP ${r.status})`);
     }
-    if(Number.isFinite(Number(d.size)) && Number(d.size)>5*1024*1024*1024){
+
+    const size=Number(d.size);
+    if(Number.isFinite(size)&&size>5*1024*1024*1024){
       throw new Error("Maximum file size is 5 GB.");
     }
 
-    progress(70);
+    progress(60);
+
+    // Save history only after the server has successfully prepared a real media URL.
     historySave(url,d.title||"EM_Video",d.method||"direct");
 
-    title.textContent="DOWNLOADING…";
+    title.textContent="DOWNLOAD STARTING…";
     title.style.background="none";
     title.style.webkitTextFillColor="#00ff88";
     title.style.filter="drop-shadow(0 0 10px #00ff88b3)";
     videos.classList.add("active-smoke");
-    btn.textContent="DOWNLOADING…";
-    progress(90);
+    btn.textContent="STARTING…";
+    progress(85);
 
-    // Start the browser download without routing large video bytes through Render.
-    // Cross-origin hosts may ignore the HTML download attribute; in that case
-    // the direct URL is opened as a download attempt instead of silently
-    // marking the job as 100%.
-    // Use the same-origin streaming endpoint as a real browser navigation.
-    // This is more reliable in Android WebView than clicking a hidden anchor,
-    // while Render streams the video without buffering it in RAM.
-    window.location.href=d.directUrl;
+    /*
+      IMPORTANT:
+      - Social/CDN videos are handed directly to the browser. Render does NOT
+        proxy their large video bytes, so a broken Render stream cannot turn
+        into a 0:00 file.
+      - YouTube uses /api/download because SaveAPI's YouTube signed stream is
+        tied to the server-side request and must be streamed through Render.
+    */
+    const a=document.createElement("a");
+    a.href=d.directUrl;
+    a.rel="noopener";
+    a.target="_self";
+    a.style.display="none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
 
     progress(100);
     title.textContent="DOWNLOAD STARTED";
@@ -444,7 +456,14 @@ async function downloadActual(){
       btn.disabled=false;
       btn.textContent="DOWNLOAD";
       progress(0);
-    },3500);
+      videos.classList.remove("active-smoke");
+      title.textContent="EM Fast 4K";
+      title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
+      title.style.webkitBackgroundClip="text";
+      title.style.webkitTextFillColor="transparent";
+      title.style.filter="none";
+    },5000);
+
   }catch(e){
     errorBox.textContent="⚠️ "+(e.message||"Unable to process the video link");
     title.textContent="EM Fast 4K";
