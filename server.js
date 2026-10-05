@@ -27,7 +27,7 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
         styleSrc: [
           "'self'",
           "'unsafe-inline'",
@@ -629,24 +629,55 @@ app.post("/api/prepare", async (req, res) => {
       });
     }
 
-    const media =
+    const mediaCandidates =
       Array.isArray(data?.medias)
-        ? data.medias.find(
+        ? data.medias.filter(
             item =>
               item &&
               item.type !== "audio" &&
-              typeof item.url ===
-                "string" &&
-              /^https?:\/\//i.test(
-                item.url
-              )
+              typeof item.url === "string" &&
+              /^https?:\/\//i.test(item.url)
           )
-        : null;
+        : [];
+
+    if (!mediaCandidates.length) {
+      return res.status(422).json({
+        error:
+          "SaveAPI could not find a direct video file for this link."
+      });
+    }
+
+    // Pick a real video file, not an empty/thumbnail/HTML URL.
+    let media = null;
+    for (const candidate of mediaCandidates) {
+      try {
+        await assertPublicHttpUrl(candidate.url);
+        const probe = await fetchWithSafeRedirects(
+          candidate.url,
+          {
+            method: "HEAD",
+            headers: {
+              "accept": "video/*,application/octet-stream;q=0.9,*/*;q=0.5"
+            }
+          }
+        );
+        const type = (probe.response.headers.get("content-type") || "").toLowerCase();
+        const size = parseTotalSize(probe.response);
+        await probe.response.body?.cancel().catch(() => {});
+        const looksVideo =
+          type.startsWith("video/") ||
+          /\.(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|3gp|ogv)(?:$|[?#])/i.test(candidate.url);
+        if (probe.response.ok && looksVideo && size !== 0) {
+          media = { ...candidate, url: probe.finalUrl };
+          break;
+        }
+      } catch {}
+    }
 
     if (!media) {
       return res.status(422).json({
         error:
-          "SaveAPI could not find a direct video file for this link."
+          "SaveAPI returned no usable video file for this link."
       });
     }
 
