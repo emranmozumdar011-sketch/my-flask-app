@@ -396,12 +396,9 @@ async function downloadActual(){
   title.style.webkitTextFillColor="transparent";
   title.style.filter="none";
   videos.classList.remove("active-smoke");
-  progress(5);
+  progress(10);
 
   try{
-    // STEP 1: Ask our server to resolve the submitted link.
-    // SaveAPI is used only when the server cannot resolve the original
-    // downloadable media URL itself. No download starts in this step.
     const r=await fetch("/api/prepare",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
@@ -419,7 +416,7 @@ async function downloadActual(){
       throw new Error("Maximum file size is 5 GB.");
     }
 
-    progress(10);
+    progress(70);
     historySave(url,d.title||"EM_Video",d.method||"direct");
 
     title.textContent="DOWNLOADING…";
@@ -429,72 +426,18 @@ async function downloadActual(){
     videos.classList.add("active-smoke");
     btn.textContent="DOWNLOADING…";
 
-    // IMPORTANT: Do NOT navigate to d.directUrl.
-    // Fetch the stream inside the app so Chrome's download manager is not
-    // started. Progress is calculated from the actual bytes received.
-    const response=await fetch(d.directUrl,{cache:"no-store"});
-    if(!response.ok||!response.body){
-      let msg=`Download failed (HTTP ${response.status})`;
-      try{const e=await response.clone().json();if(e?.error)msg=e.error}catch{}
-      throw new Error(msg);
-    }
+    // Start the browser download. The browser owns the actual file transfer.
+    // Do not claim 100% here because a normal browser navigation does not
+    // expose the download manager's final byte-level completion to this page.
+    progress(90);
 
-    const total=Number(response.headers.get("content-length")) || Number(d.size) || 0;
-    if(total>5*1024*1024*1024) throw new Error("Maximum file size is 5 GB.");
-
-    // Use Origin Private File System (OPFS) so the video is stored by the
-    // web app itself instead of being handed to Chrome's Downloads manager.
-    // This keeps the entire transfer inside the app and avoids the Chrome
-    // "Downloading file…" notification.
-    if(!navigator.storage?.getDirectory){
-      throw new Error("This browser does not support the app's private video storage.");
-    }
-
-    const root=await navigator.storage.getDirectory();
-    const rawName=String(d.title||"EM_Video").trim().replace(/[\\/:*?"<>|]/g,"_").slice(0,90)||"EM_Video";
-    const fileName=(/\.(mp4|webm|mov|m4v)$/i.test(rawName)?rawName:rawName+".mp4");
-    const fileHandle=await root.getFileHandle(fileName,{create:true});
-    const writable=await fileHandle.createWritable();
-    const reader=response.body.getReader();
-
-    let received=0;
-    let lastShown=-1;
-    try{
-      while(true){
-        const {done,value}=await reader.read();
-        if(done)break;
-        if(!value||!value.byteLength)continue;
-        await writable.write(value);
-        received+=value.byteLength;
-
-        const n=total>0
-          ? Math.min(99,Math.floor((received/total)*100))
-          : Math.min(99,Math.floor(received/1024/1024));
-        if(n!==lastShown){
-          lastShown=n;
-          progress(total>0?n:Math.max(10,n));
-        }
-      }
-      await writable.close();
-    }catch(streamError){
-      try{await writable.abort()}catch{}
-      throw streamError;
-    }
-
-    // If Content-Length was unavailable, the end of the stream is the
-    // authoritative completion point. Never claim 100% before this point.
-    progress(100);
-    title.textContent="DOWNLOAD COMPLETE";
-    title.style.background="none";
-    title.style.webkitTextFillColor="#00ff88";
-    title.style.filter="drop-shadow(0 0 12px #00ff88b3)";
-    btn.textContent="COMPLETED ✓";
-
-    // Keep the completed state visible briefly, then return to idle.
-    setTimeout(()=>resetDownloadUi(),2200);
+    // Keep this page's state until the browser leaves/returns instead of
+    // resetting after a fixed timer. This prevents our UI from claiming
+    // completion while the browser is still downloading the file.
+    window.location.href=d.directUrl;
 
   }catch(e){
-    errorBox.textContent="⚠️ "+(e.message||"Unable to download the video");
+    errorBox.textContent="⚠️ "+(e.message||"Unable to process the video link");
     title.textContent="EM Fast 4K";
     title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
     title.style.webkitBackgroundClip="text";
