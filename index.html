@@ -456,7 +456,7 @@ async function downloadActual(){
         title.textContent="DOWNLOAD COMPLETE";
         btn.textContent="DOWNLOAD COMPLETE";
         finished=true;
-        // Show 100% / COMPLETE briefly, then reset for the next link.
+        // Keep 100% / COMPLETE visible for exactly 2 seconds, then reset.
         setTimeout(()=>{
           input.value="";
           busy=false;
@@ -469,7 +469,7 @@ async function downloadActual(){
           title.style.webkitTextFillColor="transparent";
           title.style.filter="none";
           videos.classList.remove("active-smoke");
-        },350);
+        },2000);
         break;
       }
       if(Number.isFinite(st.percent)) progress(Math.max(90,Math.min(99,st.percent)));
@@ -509,11 +509,6 @@ function resetDownloadUi(){
 window.addEventListener("pageshow",()=>{
   if(!busy) resetDownloadUi();
 });
-document.addEventListener("visibilitychange",()=>{
-  // Android/Chrome can change visibility when the browser download starts.
-  // Do not reset the UI while the real download is still running.
-});
-
 videos.onclick=()=>{renderHistory();modal.style.display="flex"};videos.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();renderHistory();modal.style.display="flex"}};$("closeModal").onclick=()=>modal.style.display="none";input.onkeydown=e=>{if(e.key==="Enter")startDownload()};renderHistory();
 </script>
 <style id="download-button-click-fix">

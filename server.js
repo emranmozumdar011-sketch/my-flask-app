@@ -509,48 +509,13 @@ app.post("/api/prepare", async (req, res) => {
 
     await assertPublicHttpUrl(media.url);
 
-    let size = Number(media.file_size ?? media.filesize ?? media.size ?? media.content_length);
-    if (!Number.isFinite(size) && Number.isFinite(Number(media.size_mb))) size = Number(media.size_mb) * 1024 * 1024;
-    if (!Number.isFinite(size)) size = null;
+    // SaveAPI has already returned the media URL. Avoid an extra Range/HEAD
+    // probe here so Chrome can receive the real download stream sooner.
+    const size = Number.isFinite(Number(media.size_mb))
+      ? Number(media.size_mb) * 1024 * 1024
+      : (Number.isFinite(Number(media.size)) ? Number(media.size) : null);
 
     if (tooLarge(size)) return res.status(413).json({ error: "Maximum file size is 5 GB." });
-
-    // Normal social-media CDN links usually support a tiny Range request.
-    // If a provider does not expose Range/Content-Length, do not reject a valid video URL solely for that reason.
-    try {
-      const check = await fetchWithSafeRedirects(media.url, {
-        method: "GET",
-        headers: {
-          Range: "bytes=0-0",
-          Accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.5",
-          "accept-encoding": "identity"
-        },
-        signal: AbortSignal.timeout(15000)
-      });
-
-      const checkType = (check.response.headers.get("content-type") || "").toLowerCase();
-      const checkSize = parseTotalSize(check.response);
-      const hasVideoType =
-        checkType.startsWith("video/") ||
-        checkType === "application/octet-stream" ||
-        VIDEO_EXT.test(check.finalUrl);
-
-      await check.response.body?.cancel().catch(() => {});
-
-      if (!check.response.ok && check.response.status !== 206) {
-        return res.status(502).json({ error: "The video download server did not return the file. Please try again." });
-      }
-
-      if (!hasVideoType && !media.type?.toLowerCase?.().includes("video")) {
-        return res.status(502).json({ error: "The returned file is not a video. Please try again." });
-      }
-
-      if (size == null && Number.isFinite(checkSize)) size = checkSize;
-      if (tooLarge(size)) return res.status(413).json({ error: "Maximum file size is 5 GB." });
-    } catch {
-      // Do not fail here just because the CDN blocks a HEAD/Range probe.
-      // /api/download will make the real streaming request.
-    }
 
     const title = cleanFileName(data?.meta?.title || data?.title || media?.title || titleFromUrl(inputUrl));
 
