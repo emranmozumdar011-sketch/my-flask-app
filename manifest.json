@@ -1,0 +1,26 @@
+{
+  "background_color": "#ffffff",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "em-fast-4k-uasm.onrender",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "em-fast-4k-uasm.onrender",
+  "start_url": "/",
+  "theme_color": "#060913",
+  "icons": [
+    {
+      "src": "https://em-fast-4k-uasm.onrender.com/favicon.ico",
+      "type": "image/x-icon",
+      "isSquare": false,
+      "isPng": false,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 0,
+      "is512x512": false,
+      "is256x256": false,
+      "is192x192": false
+    }
+  ],
+  "id": "com.emfast4k.app"
+}
