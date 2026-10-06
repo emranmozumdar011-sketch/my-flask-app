@@ -456,8 +456,19 @@ async function downloadActual(){
         title.textContent="DOWNLOAD COMPLETE";
         btn.textContent="DOWNLOAD COMPLETE";
         finished=true;
+        // Immediately reset the page for the next download.
+        // No fake timer and no 1-second wait.
+        input.value="";
         busy=false;
         btn.disabled=false;
+        btn.textContent="DOWNLOAD";
+        progress(0);
+        title.textContent="EM Fast 4K";
+        title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
+        title.style.webkitBackgroundClip="text";
+        title.style.webkitTextFillColor="transparent";
+        title.style.filter="none";
+        videos.classList.remove("active-smoke");
         break;
       }
       if(Number.isFinite(st.percent)) progress(Math.max(90,Math.min(99,st.percent)));
