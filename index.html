@@ -426,15 +426,42 @@ async function downloadActual(){
     videos.classList.add("active-smoke");
     btn.textContent="DOWNLOADING…";
 
-    // Start the browser download. The browser owns the actual file transfer.
-    // Do not claim 100% here because a normal browser navigation does not
-    // expose the download manager's final byte-level completion to this page.
+    // Start Chrome's real download without leaving this page.
+    // A hidden iframe triggers the browser download while this page polls
+    // the server-side byte count. 100% is shown only when the real stream
+    // has finished — no fake timer and no forced 20-second wait.
     progress(90);
+    let frame=document.getElementById("realDownloadFrame");
+    if(!frame){
+      frame=document.createElement("iframe");
+      frame.id="realDownloadFrame";
+      frame.style.display="none";
+      document.body.appendChild(frame);
+    }
+    frame.src=d.directUrl;
 
-    // Keep this page's state until the browser leaves/returns instead of
-    // resetting after a fixed timer. This prevents our UI from claiming
-    // completion while the browser is still downloading the file.
-    window.location.href=d.directUrl;
+    const jobMatch=String(d.directUrl).match(/[?&]job=([^&]+)/);
+    const jobId=jobMatch?decodeURIComponent(jobMatch[1]):"";
+    if(!jobId) throw new Error("Download progress could not be started.");
+
+    let finished=false;
+    while(!finished){
+      await new Promise(resolve=>setTimeout(resolve,100));
+      const pr=await fetch(`/api/download-progress?job=${encodeURIComponent(jobId)}`,{cache:"no-store"});
+      if(!pr.ok) continue;
+      const st=await pr.json();
+      if(st.failed) throw new Error("The download stream failed. Please try again.");
+      if(st.done){
+        progress(100);
+        title.textContent="DOWNLOAD COMPLETE";
+        btn.textContent="DOWNLOAD COMPLETE";
+        finished=true;
+        busy=false;
+        btn.disabled=false;
+        break;
+      }
+      if(Number.isFinite(st.percent)) progress(Math.max(90,Math.min(99,st.percent)));
+    }
 
   }catch(e){
     errorBox.textContent="⚠️ "+(e.message||"Unable to process the video link");

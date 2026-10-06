@@ -16,6 +16,24 @@ const PORT = process.env.PORT || 3000;
 const SAVEAPI_KEY = process.env.SAVEAPI_KEY || process.env.SAVEAPI_API_KEY || "";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024;
+
+// Browser-download progress jobs. The page polls these while Chrome downloads
+// the file in a hidden iframe, so the UI can reach 100% when the server
+// finishes sending the actual file instead of stopping at a fake 90%.
+const downloadJobs = new Map();
+
+function createDownloadJob() {
+  const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  downloadJobs.set(id, { done: false, failed: false, bytes: 0, total: null });
+  setTimeout(() => downloadJobs.delete(id), 10 * 60 * 1000);
+  return id;
+}
+
+function updateDownloadJob(id, patch) {
+  if (!id || !downloadJobs.has(id)) return;
+  Object.assign(downloadJobs.get(id), patch);
+}
+
 const MAX_REDIRECTS = 5;
 const SAVEAPI_BASE = "https://api.saveapi.org/v1";
 
@@ -394,6 +412,8 @@ app.post("/api/prepare", async (req, res) => {
     return res.status(400).json({ error: "Please provide a valid video link." });
   }
 
+  const downloadJobId = createDownloadJob();
+
   try {
     await assertPublicHttpUrl(inputUrl);
 
@@ -416,7 +436,7 @@ app.post("/api/prepare", async (req, res) => {
       const title = cleanFileName(titleFromUrl(direct.url));
       return res.json({
         ok: true,
-        directUrl: `/api/download?url=${encodeURIComponent(direct.url)}&name=${encodeURIComponent(title)}`,
+        directUrl: `/api/download?url=${encodeURIComponent(direct.url)}&name=${encodeURIComponent(title)}&job=${encodeURIComponent(downloadJobId)}`,
         title,
         method: "direct",
         size: direct.size
@@ -441,7 +461,7 @@ app.post("/api/prepare", async (req, res) => {
       // Do not probe it with Range here. Render streams it to the browser in /api/download.
       return res.json({
         ok: true,
-        directUrl: `/api/download?url=${encodeURIComponent(yt.url)}&name=${encodeURIComponent(yt.title)}`,
+        directUrl: `/api/download?url=${encodeURIComponent(yt.url)}&name=${encodeURIComponent(yt.title)}&job=${encodeURIComponent(downloadJobId)}`,
         title: yt.title,
         method: "saveapi-youtube",
         quality: yt.quality,
@@ -536,7 +556,7 @@ app.post("/api/prepare", async (req, res) => {
 
     return res.json({
       ok: true,
-      directUrl: `/api/download?url=${encodeURIComponent(media.url)}&name=${encodeURIComponent(title)}`,
+      directUrl: `/api/download?url=${encodeURIComponent(media.url)}&name=${encodeURIComponent(title)}&job=${encodeURIComponent(downloadJobId)}`,
       title,
       method: "saveapi",
       size
@@ -591,12 +611,26 @@ function diagnoseFirstChunk(bytes, contentType) {
 }
 
 // ----------------------------------------------------
+// BROWSER DOWNLOAD PROGRESS
+// ----------------------------------------------------
+
+app.get("/api/download-progress", (req, res) => {
+  const job = downloadJobs.get(String(req.query?.job || ""));
+  if (!job) return res.status(404).json({ ok: false, error: "Download job not found." });
+  const total = Number.isFinite(job.total) && job.total > 0 ? job.total : null;
+  const percent = job.done ? 100 : (total ? Math.min(99, Math.floor((job.bytes / total) * 100)) : 90);
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ ok: true, done: job.done, failed: job.failed, bytes: job.bytes, total, percent });
+});
+
+// ----------------------------------------------------
 // SECURE VIDEO STREAM / DOWNLOAD
 // ----------------------------------------------------
 
 app.get("/api/download", async (req, res) => {
   const inputUrl = String(req.query?.url || "").trim();
   const requestId = Math.random().toString(36).slice(2, 9);
+  const jobId = String(req.query?.job || "");
 
   const host = (() => {
     try { return new URL(inputUrl).hostname; } catch { return "invalid"; }
@@ -630,6 +664,7 @@ app.get("/api/download", async (req, res) => {
 
     const contentType = response.headers.get("content-type") || "";
     const contentLength = parseTotalSize(response);
+    updateDownloadJob(jobId, { total: Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null, bytes: 0, failed: false, done: false });
 
     console.log(
       `[DOWNLOAD ${requestId}] UPSTREAM status=${response.status} ` +
@@ -730,6 +765,7 @@ const headerFileName = `${safeBaseName}_${uniqueStamp}_${randomPart}`;
 
     try {
       totalBytes = firstBytes.byteLength;
+      updateDownloadJob(jobId, { bytes: totalBytes });
       if (!res.write(firstBytes)) {
         await new Promise(resolve => res.once("drain", resolve));
       }
@@ -740,6 +776,7 @@ const headerFileName = `${safeBaseName}_${uniqueStamp}_${randomPart}`;
         if (!value || value.byteLength === 0) continue;
 
         totalBytes += value.byteLength;
+        updateDownloadJob(jobId, { bytes: totalBytes });
 
         if (totalBytes > MAX_FILE_BYTES) {
           await reader.cancel().catch(() => {});
@@ -760,12 +797,14 @@ const headerFileName = `${safeBaseName}_${uniqueStamp}_${randomPart}`;
       }
 
       console.log(`[DOWNLOAD ${requestId}] SUCCESS total-bytes=${totalBytes}`);
+      updateDownloadJob(jobId, { bytes: totalBytes, done: true, failed: false });
       res.end();
     } catch (streamError) {
       console.error(
         `[DOWNLOAD ${requestId}] STREAM_ERROR name=${streamError?.name || "Error"} ` +
         `message=${streamError?.message || streamError} bytes=${totalBytes}`
       );
+      updateDownloadJob(jobId, { failed: true, done: false });
       if (!res.destroyed) res.destroy(streamError);
     }
   } catch (error) {
@@ -773,6 +812,7 @@ const headerFileName = `${safeBaseName}_${uniqueStamp}_${randomPart}`;
       `[DOWNLOAD ${requestId}] REQUEST_ERROR name=${error?.name || "Error"} ` +
       `message=${error?.message || error}`
     );
+    updateDownloadJob(jobId, { failed: true, done: false });
     if (res.headersSent) return res.destroy(error);
 
     const message = error?.name === "TimeoutError"
