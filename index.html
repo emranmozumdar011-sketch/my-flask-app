@@ -456,19 +456,20 @@ async function downloadActual(){
         title.textContent="DOWNLOAD COMPLETE";
         btn.textContent="DOWNLOAD COMPLETE";
         finished=true;
-        // Immediately reset the page for the next download.
-        // No fake timer and no 1-second wait.
-        input.value="";
-        busy=false;
-        btn.disabled=false;
-        btn.textContent="DOWNLOAD";
-        progress(0);
-        title.textContent="EM Fast 4K";
-        title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
-        title.style.webkitBackgroundClip="text";
-        title.style.webkitTextFillColor="transparent";
-        title.style.filter="none";
-        videos.classList.remove("active-smoke");
+        // Show 100% / COMPLETE briefly, then reset for the next link.
+        setTimeout(()=>{
+          input.value="";
+          busy=false;
+          btn.disabled=false;
+          btn.textContent="DOWNLOAD";
+          progress(0);
+          title.textContent="EM Fast 4K";
+          title.style.background="linear-gradient(135deg,#00f3ff,#b062ff)";
+          title.style.webkitBackgroundClip="text";
+          title.style.webkitTextFillColor="transparent";
+          title.style.filter="none";
+          videos.classList.remove("active-smoke");
+        },350);
         break;
       }
       if(Number.isFinite(st.percent)) progress(Math.max(90,Math.min(99,st.percent)));
@@ -509,9 +510,8 @@ window.addEventListener("pageshow",()=>{
   if(!busy) resetDownloadUi();
 });
 document.addEventListener("visibilitychange",()=>{
-  if(document.visibilityState==="visible" && busy) {
-    setTimeout(()=>resetDownloadUi(),250);
-  }
+  // Android/Chrome can change visibility when the browser download starts.
+  // Do not reset the UI while the real download is still running.
 });
 
 videos.onclick=()=>{renderHistory();modal.style.display="flex"};videos.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();renderHistory();modal.style.display="flex"}};$("closeModal").onclick=()=>modal.style.display="none";input.onkeydown=e=>{if(e.key==="Enter")startDownload()};renderHistory();
