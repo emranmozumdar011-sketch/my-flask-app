@@ -1,0 +1,78 @@
+name: Build EM Fast 4K AdMob Android
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find source ZIP
+        id: findzip
+        shell: bash
+        run: |
+          ZIP="$(find . -maxdepth 2 -type f -name '*.zip' | head -n 1)"
+          if [ -z "$ZIP" ]; then
+            echo "No ZIP file found. Upload EM4K AdMob Security Update.zip to the repository."
+            exit 1
+          fi
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Extract Android project
+        shell: bash
+        run: |
+          rm -rf android-source
+          mkdir -p android-source
+          unzip -q "${{ steps.findzip.outputs.zip }}" -d android-source
+
+          PROJECT_DIR="$(find android-source -type f -name settings.gradle -o -name settings.gradle.kts | head -n 1)"
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "Android project (settings.gradle) was not found inside the ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PROJECT_DIR")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project: $PROJECT_DIR"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
+
+      - name: Build release AAB (unsigned)
+        shell: bash
+        run: |
+          gradle --no-daemon -p "$PROJECT_DIR" bundleRelease
+
+      - name: Upload APK and AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: EM4K-AdMob-build
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+            ${{ env.PROJECT_DIR }}/app/build/outputs/bundle/release/app-release.aab
